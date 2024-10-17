@@ -31,6 +31,10 @@ Index kotlin LSP
 ```
 .
 ├── examples
+│   ├── .libs
+│   │   └── klib.jar        # symlink to src/.build/klib.jar
+│   ├── .res
+│   │   └── log.conf        # configure the logger
 │   ├── ClientExample.kt    
 │   ├── LogExample.kt       
 │   ├── ServerExample.kt    
@@ -62,7 +66,7 @@ Index kotlin LSP
     - [x] Console log
     - [ ] JSON log
     - [ ] File log
-- [x] Kafka?
+- [ ] Kafka?
 - [ ] OAuth2
 - [x] Parser Combinator
 - [x] Rust-like Result type
