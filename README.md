@@ -74,4 +74,5 @@ Index kotlin LSP
     - [x] JSON serde
     - [ ] XML serde
 - [ ] Test enginge
+- [ ] neotest adapter
 

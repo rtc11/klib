@@ -16,10 +16,12 @@ lsp:
 NAME := klib
 
 # main class: `make run MAIN=myapp.AppKt`
-MAIN := LogExampleKt
+MAIN := test.TesterKt
+# defaults to $@ that makes run.sh take args, e.g. .build/run.sh arg1 arg2
+ARGS := "\$$@"
 
 run: 
-	@echo "#!/bin/bash\n\nset -e\n\njava -Dfile.encoding=UTF-8 -Dsun.stdout.encoding=UTF-8 -Dsun.stderr.encoding=UTF-8 -cp .build/:${LIBS}${RES} $(MAIN)" >.build/run.sh
+	@echo "#!/bin/bash\n\nset -e\n\njava -Dfile.encoding=UTF-8 -Dsun.stdout.encoding=UTF-8 -Dsun.stderr.encoding=UTF-8 -cp .build/:${LIBS}${RES} $(MAIN) ${ARGS}" >.build/run.sh
 	@chmod +x .build/run.sh
 	@.build/run.sh
 
