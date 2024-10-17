@@ -36,10 +36,10 @@ libs: .build/.libs/cached.txt
 	@echo '#!/usr/bin/env bash\nfor i in $$(cat libs.txt | grep -v "^#") ; do mvn dependency:get -Dmaven.repo.local=./.build/.libs -Dartifact=$$i -Dtransitive=true ; done' >.build/.libs/download.sh
 	@chmod +x .build/.libs/download.sh
 
-libjar:
+lib:
 	kotlinc $(SRC) -cp ${LIBS}:${RES} -d .build/${NAME}.jar 
 
-appjar:
+app:
 	kotlinc $(SRC) -cp ${LIBS}:${RES} -include-runtime -d .build/${NAME}.jar 
 
 
