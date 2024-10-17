@@ -13,7 +13,7 @@ lsp:
 	@chmod +x kls-classpath
 
 # PROJECT NAME: `make appjar NAME=myapp`
-NAME := klib 
+NAME := klib
 
 # main class: `make run MAIN=myapp.AppKt`
 MAIN := LogExampleKt
@@ -37,21 +37,13 @@ libs: .build/.libs/cached.txt
 	@chmod +x .build/.libs/download.sh
 
 libjar:
-	kotlinc $(SRC) -cp ${LIBS}:${RES} -d .build/lib.jar 
+	@kotlinc $(SRC) -cp ${LIBS} -d .build/${NAME}.jar 
 
 appjar:
-	kotlinc $(SRC) -cp ${LIBS}:${RES} -include-runtime -d .build/app.jar 
-
-
-# TODO: incremental build and caching requires a build tree
-#
-# build: libs $(CLASS)
-#
-# .build/%Kt.class: %.kt
-# 	@mkdir -p .build
-# 	@kotlinc -d .build -cp ${LIBS} "$<"
+	@kotlinc $(SRC) -cp ${LIBS}:${RES} -include-runtime -d .build/${NAME}.jar 
 
 clean:
 	@mkdir -p .build
-	rm -rf $(shell rg --files .build/ -g '*.class')
+	@rm -rf $(shell rg --files .build/ -g '*.class')
+	@rm -f .build/${NAME}.jar
 
