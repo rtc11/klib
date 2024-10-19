@@ -1,6 +1,6 @@
 package server
 
-import org.junit.jupiter.api.*
+import test.*
 import util.*
 
 class PathTest {

@@ -1,3 +1,0 @@
-org.junit.platform:junit-platform-console-standalone:1.11.2
-org.junit.jupiter:junit-jupiter-api:5.11.2
-

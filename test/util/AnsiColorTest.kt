@@ -1,6 +1,6 @@
 package util
 
-import org.junit.jupiter.api.*
+import test.Test
 
 class AnsiColorTest {
 

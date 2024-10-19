@@ -1,14 +1,14 @@
 package json
 
-import org.junit.jupiter.api.*
-import org.junit.jupiter.api.Assertions.assertEquals
+import test.*
 import util.*
 
 class JsonParserTest {
 
     @Test
     fun `can parse complex json`() {
-        println(JsonParser.parse(json).unwrap())
+         JsonParser.parse(json).unwrap() 
+        // TODO: assert
     }
 
     @Test
@@ -23,7 +23,7 @@ class JsonParserTest {
             kids = listOf("AB", "CD")
         )
 
-        assertEquals(expected, person)
+        assertEq(expected, person)
     }
 
     @Test
@@ -36,7 +36,7 @@ class JsonParserTest {
         )
         val json = JsonSerde.serialize(person.into()).unwrap()
         fun String.removeWhitespaces(): String = replace("\n", "").replace(" ", "")
-        assertEquals(json.removeWhitespaces(), json.removeWhitespaces())
+        assertEq(json.removeWhitespaces(), json.removeWhitespaces())
     }
 
     @Test
@@ -56,8 +56,8 @@ class JsonParserTest {
             )
         )
         val jsons = persons.map { it.into() }
-        val json = JsonSerde.serialize(jsons).unwrap()
-        println(json)
+        JsonSerde.serialize(jsons).unwrap()
+        // TODO: assert
     }
 
     private data class Person(

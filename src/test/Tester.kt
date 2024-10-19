@@ -27,12 +27,26 @@ object ClassLoader {
                 .filterNot { it.isInterface }
                 .filterNot { it.isEnum }
                 .filterNot { it.declaredConstructors.isEmpty() }
+                .filterNot { it.isHidden }
+                .filterNot { it.isAnonymousClass }
                 .forEach {
                     try {
                         val clazz = it.getDeclaredConstructor().newInstance()
                         clazz::class.java.methods
                             .filter { it.isAnnotationPresent(Test::class.java) }
-                            .forEach { it.invoke(clazz) }
+                            .map { 
+                                val start = System.nanoTime()
+                                try {
+                                    it.invoke(clazz)
+                                    val timedMs = (System.nanoTime() - start) / 1_000_000
+                                    timedMs to "${ANSI.BRIGHT_GREEN}[SUCCESS]${ANSI.RESET} ${it.name}"
+                                } catch (e: AssertionError) {
+                                    val timedMs = (System.nanoTime() - start) / 1_000_000
+                                    timedMs to "${ANSI.BRIGHT_RED}[FAILURE]${ANSI.RESET} ${it.name}"
+                                }
+                            }.forEach { (ms, status) -> 
+                                println("$status [${ms}ms]") 
+                            }
                     } catch (cnf: ClassNotFoundException) {
                         println("Class not found: $it")
                     } catch (i: InstantiationException) {

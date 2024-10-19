@@ -3,8 +3,7 @@ package server
 import client.*
 import json.*
 import kotlinx.coroutines.*
-import org.junit.jupiter.api.*
-import org.junit.jupiter.api.Assertions.assertEquals
+import test.*
 import serde.*
 import util.*
 import java.net.*
@@ -12,7 +11,15 @@ import java.net.*
 class ServerTest {
     private data class Name(val name: String) : Into<Json> {
         override fun into(): Json = mapOf(Name::name.name to name)
+
+        companion object {
+            fun from(json: Json): Name {
+                val name: String by json
+                return Name(name)
+            }
+        }
     }
+
 
     private val server = Server(8080).apply {
         router("/") {
@@ -27,32 +34,32 @@ class ServerTest {
 
     @Test
     fun `response is idempotent`() {
-        val client = Client(StringSerde)
+        val client = Client()
         server.start(0)
 
-        fun fetchText() = runBlocking {
+        fun fetchText(): HttpResponse = runBlocking {
             client.get(URI("http://localhost:8080/text")) {
                 setHeader("Content-Type", ContentType.Text.withCharsetUtf8())
                 setHeader("Accept", ContentType.Text.value)
             }
         }
 
-        fun fetchJson() = runBlocking {
+        fun fetchJson(): HttpResponse  = runBlocking {
             client.get(URI("http://localhost:8080/json")) {
                 setHeader("Content-Type", ContentType.Json.withCharsetUtf8())
                 setHeader("Accept", ContentType.Json.value)
             }
         }
 
-        val firstText = fetchText().expect("hello")
-        val secondText = fetchText().expect("hello")
-        val firstJson = fetchJson().expect("Json with name:robin")
-        val secondJson = fetchJson().expect("Json with name:robin")
+        val firstText = StringSerde.deserialize(fetchText().body).expect("hello")
+        val secondText = StringSerde.deserialize(fetchText().body).expect("hello")
+        val firstJson = Name.from(JsonSerde.deserialize(fetchJson().body).expect("Json with name:robin"))
+        val secondJson = Name.from(JsonSerde.deserialize(fetchJson().body).expect("Json with name:robin"))
 
-        assertEquals("hello", firstText)
-        assertEquals("hello", secondText)
-        assertEquals("{\"name\" : \"robin\"}", firstJson)
-        assertEquals("{\"name\" : \"robin\"}", secondJson)
+        assertEq("hello", firstText)
+        assertEq("hello", secondText)
+        assertEq("{\"name\" : \"robin\"}", firstJson)
+        assertEq("{\"name\" : \"robin\"}", secondJson)
 
         client.close()
         server.stop(0)
