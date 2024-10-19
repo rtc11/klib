@@ -47,7 +47,7 @@ class Router(private val prefix: String) {
 
     private fun add(route: Route) {
         routes.add(route)
-        log.info("route ${route.method} $prefix${route.path.path}")
+        log.debug("route ${route.method} $prefix${route.path.path}")
     }
 }
 

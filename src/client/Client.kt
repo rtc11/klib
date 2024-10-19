@@ -11,23 +11,15 @@ import kotlin.time.Duration.Companion.seconds
 
 typealias Request = HttpRequest.Builder.() -> HttpRequest.Builder
 
-class HttpClientException(msg: String, cause: Throwable) : RuntimeException(msg, cause)
-
-interface HttpClient<T> {
-    suspend fun get(url: URI, modifier: Request): Result<T, HttpClientException>
+interface HttpClient {
+    suspend fun get(url: URI, modifier: Request): HttpResponse
 }
 
-class Client<T>(
-    private val serde: Serde<T>,
-//    private val host: String? = null,
-//    val parser: (String) -> ParserResult<T>,
-//    val retries: Int = 1,
-//    val backoff: Duration = 1.seconds,
-) : client.HttpClient<T>, AutoCloseable {
+class Client : client.HttpClient, AutoCloseable {
     private val http: HttpClient = HttpFactory.new()
     private val log = logger("client")
 
-    override suspend fun get(url: URI, modifier: Request): Result<T, HttpClientException> {
+    override suspend fun get(url: URI, modifier: Request): HttpResponse {
         val req = HttpRequest.newBuilder()
             .modifier()
             .uri(url)
@@ -35,20 +27,43 @@ class Client<T>(
             .build()
 
         val start = System.nanoTime()
-        val res = http.sendAsync(req, HttpResponse.BodyHandlers.ofString()).await()
+        val res = http.sendAsync(req, java.net.http.HttpResponse.BodyHandlers.ofString()).await()
         val timedMs = (System.nanoTime() - start) / 1_000_000
         val body = res.body().trim()
         res.headers()
 
-        log.info("${req.method()} $url ${res.statusCode()} [${timedMs}ms]")
+        log.trace("${req.method()} $url ${res.statusCode()} [${timedMs}ms]")
 
-        return serde.deserialize(body).mapError {
-            HttpClientException("Failed to deserialize response", it)
-        }
+        return HttpResponse(res.statusCode(), res.headers().map(), body)
+    }
+
+    suspend fun post(url: URI, body: String, modifier: Request): HttpResponse {
+        val req = HttpRequest.newBuilder()
+            .modifier()
+            .uri(url)
+            .timeout(10.seconds.toJavaDuration())
+            .POST(HttpRequest.BodyPublishers.ofString(body))
+            .build()
+
+        val start = System.nanoTime()
+        val res = http.sendAsync(req, java.net.http.HttpResponse.BodyHandlers.ofString()).await()
+        val timedMs = (System.nanoTime() - start) / 1_000_000
+        res.headers()
+
+        log.trace("${req.method()} $url ${res.statusCode()} [${timedMs}ms]")
+
+        return HttpResponse(res.statusCode(), res.headers().map(), "")
     }
 
     override fun close() = http.close()
 }
+
+
+data class HttpResponse(
+    val statusCode: Int,
+    val headers: Map<String, List<String>>,
+    val body: String
+)
 
 private object HttpFactory {
     fun new(): HttpClient = HttpClient.newBuilder().connectTimeout(5.seconds.toJavaDuration()).build()

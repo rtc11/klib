@@ -11,7 +11,7 @@ import java.util.concurrent.atomic.*
 import kotlin.concurrent.*
 import kotlin.coroutines.*
 
-val log = logger("k")
+val log = logger("server")
 
 class Server(
     port: Int = 8080,
@@ -29,7 +29,7 @@ class Server(
      */
     fun start(gracefulShutdownSec: Int = 3) {
         http.bind(listener, 0)
-        log.info("K is on http://${listener.hostString}:${listener.port}")
+        log.info("server is on http://${listener.hostString}:${listener.port}")
         http.start()
         getRuntime().addShutdownHook(thread(start = false) { stop(gracefulShutdownSec) })
         onStartHandlers.forEach { it.run() }
@@ -39,7 +39,7 @@ class Server(
      * Stop the http server
      */
     fun stop(delaySec: Int) {
-        log.info("K is stopping...")
+        log.info("server is stopping...")
         http.stop(delaySec)
         onStopHandlers.reversed().forEach { it.run() }
     }

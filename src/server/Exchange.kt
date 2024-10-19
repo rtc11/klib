@@ -77,6 +77,8 @@ class Exchange(private val exchange: HttpExchange) : AutoCloseable {
         when (val out = beginResponse(status, body?.size?.toLong(), contentType)) {
             is Result.Ok -> body?.let { out.value.write(it) }
             is Result.Err -> internalServerError(out.error)
+        }.also {
+            log.trace( "request: ${exchange.requestMethod} $path [${status.code}]" )
         }
     }
 
