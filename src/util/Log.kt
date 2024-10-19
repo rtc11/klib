@@ -5,13 +5,16 @@ import java.time.format.*
 import java.time.temporal.*
 import java.util.logging.*
 
-private val handler = ConsoleHandler().apply {
-    formatter = ConsoleFormatter()
-    level = Logger.level
-    encoding = "UTF-8"
-}
+private val handler =
+        ConsoleHandler().apply {
+            formatter = ConsoleFormatter()
+            level = Logger.level
+            encoding = "UTF-8"
+        }
 
-class Logger(name: String) {
+private val loggers = mutableMapOf<String, Logger>()
+
+class Logger internal constructor(name: String) {
     private val log = java.util.logging.Logger.getLogger(name).also { it.addHandler(handler) }
 
     fun trace(msg: Any) = log.finer("$msg")
@@ -24,16 +27,13 @@ class Logger(name: String) {
     companion object {
         var level: Level = Level.ALL
 
-        /**
-         * Logger.load("/log.conf") is required to use custom loggers
-         */
-        fun load(path: String) = Resource.input(path).let {
-            LogManager.getLogManager().readConfiguration(it)
-        }
+        /** Logger.load("/log.conf") is required to use custom loggers */
+        fun load(path: String) =
+                Resource.input(path).let { LogManager.getLogManager().readConfiguration(it) }
     }
 }
 
-fun logger(name: String) = Logger(name)
+fun logger(name: String) = loggers[name] ?: Logger(name).also { loggers[name] = it }
 
 object ANSI {
     const val BLACK = "\u001B[30m"
@@ -54,7 +54,7 @@ object ANSI {
     const val RESET = "\u001B[0m"
 }
 
-//! not supported by IntelliJ console
+// ! not supported by IntelliJ console
 object ANSI24bit {
     // foreground color, also called text, r:0-255 g:0-255 b:0-255
     fun fg(r: Int, g: Int, b: Int): String = "\u001B[38;2;$r;$g;$b;m"
@@ -63,33 +63,37 @@ object ANSI24bit {
 }
 
 class ConsoleFormatter : Formatter() {
-    private val isoFixedNanoLength = DateTimeFormatterBuilder()
-        .appendValue(ChronoField.HOUR_OF_DAY, 2)
-        .appendLiteral(':')
-        .appendValue(ChronoField.MINUTE_OF_HOUR, 2)
-        .optionalStart()
-        .appendLiteral(':')
-        .appendValue(ChronoField.SECOND_OF_MINUTE, 2)
-        .optionalStart()
-        .appendFraction(ChronoField.NANO_OF_SECOND, 6, 6, true)
-        .toFormatter()
+    private val isoFixedNanoLength =
+            DateTimeFormatterBuilder()
+                    .appendValue(ChronoField.HOUR_OF_DAY, 2)
+                    .appendLiteral(':')
+                    .appendValue(ChronoField.MINUTE_OF_HOUR, 2)
+                    .optionalStart()
+                    .appendLiteral(':')
+                    .appendValue(ChronoField.SECOND_OF_MINUTE, 2)
+                    .optionalStart()
+                    .appendFraction(ChronoField.NANO_OF_SECOND, 6, 6, true)
+                    .toFormatter()
 
-    private val date get() = isoFixedNanoLength.format(LocalDateTime.now())
+    private val date
+        get() = isoFixedNanoLength.format(LocalDateTime.now())
     override fun format(record: LogRecord): String {
         val msg = formatMessage(record)
         val (lvlColor, lvlName) = record.level.colorAndName()
         return "${ANSI.CYAN}$date ${ANSI.WHITE}[${record.longThreadID}] $lvlColor$lvlName ${ANSI.YELLOW}${record.loggerName} ${ANSI.BRIGHT_WHITE}$msg\n${ANSI.RESET}"
     }
 
-    private fun Level.colorAndName(): Pair<String, String> = when (this.name) {
-//        "OFF" -> {}
-        "SEVERE" -> ANSI.BRIGHT_RED to "ERROR"
-        "WARNING" -> ANSI.BRIGHT_YELLOW to "WARN "
-        "INFO" -> ANSI.BRIGHT_GREEN to "INFO "
-        "FINE" -> ANSI.WHITE to "DEBUG"
-        "FINER" -> ANSI.CYAN to "TRACE"
-//        "FINEST" -> {}
-//        "ALL" -> {}
-        else -> ANSI.BRIGHT_WHITE to name
-    }
+    private fun Level.colorAndName(): Pair<String, String> =
+            when (this.name) {
+                //        "OFF" -> {}
+                "SEVERE" -> ANSI.BRIGHT_RED to "ERROR"
+                "WARNING" -> ANSI.BRIGHT_YELLOW to "WARN "
+                "INFO" -> ANSI.BRIGHT_GREEN to "INFO "
+                "FINE" -> ANSI.WHITE to "DEBUG"
+                "FINER" -> ANSI.CYAN to "TRACE"
+                //        "FINEST" -> {}
+                //        "ALL" -> {}
+                else -> ANSI.BRIGHT_WHITE to name
+            }
 }
+

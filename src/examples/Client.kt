@@ -11,27 +11,23 @@ fun main() {
     Logger.load("/log.conf")
     val log = logger("example")
 
-    Client().use { client ->
-        client.getPerson(1).let { res ->
+    val client = Client()
+    fun getPerson(id: Int): Person {
+        return client.getPerson(id).let { res ->
+            log.info("find person $id")
             when (res.statusCode) {
-                404 -> log.warn("person not found")
-                200 -> log.info(Person.from(JsonSerde.deserialize(res.body).unwrap()))
-                else -> log.error("unexpected status code: ${res.statusCode}")
+                404 -> {
+                    log.info("person missing. creating person..")
+                    client.createPerson(id, Person("Alice")).let { log.info("person created") } 
+                    getPerson(id)
+                }
+                200 -> Person.from(JsonSerde.deserialize(res.body).unwrap()) 
+                else -> error("unexpected status code: ${res.statusCode}")
             }
         }
     }
-
-    Client().use { client -> client.createPerson(1, Person("Alice")) }
-
-    Client().use { client ->
-        client.getPerson(1).let { res ->
-            when (res.statusCode) {
-                404 -> log.warn("person not found")
-                200 -> log.info(Person.from(JsonSerde.deserialize(res.body).unwrap()))
-                else -> log.error("unexpected status code: ${res.statusCode}")
-            }
-        }
-    }
+    
+    log.info("person: ${getPerson(1)}")
 }
 
 private fun Client.getPerson(id: Int): HttpResponse = runBlocking {
