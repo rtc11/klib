@@ -1,2 +1,4 @@
 .build
+.libs
+*/.libs
 kls-classpath
