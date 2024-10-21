@@ -32,9 +32,8 @@ fun main(args: Array<String>) {
         ClassLoader.findTestClasses("/")
     } else {
         val cmd = Cli.parse(args)
-            println("Running test ${cmd.testName} in class ${cmd.className}")
-            ClassLoader.runTest(cmd.className, cmd.testName)
-        }
+        println("Running test ${cmd.testName} in class ${cmd.className}")
+        ClassLoader.runTest(cmd.className, cmd.testName)
     }
 }
 
