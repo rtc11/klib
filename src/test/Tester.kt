@@ -6,16 +6,40 @@ import java.lang.reflect.Method
 import kotlin.io.println
 import util.*
 
+data class Cmd(val className: String, val testName: String)
+
+object Cli { 
+    fun parse(args: Array<String>): Cmd {
+        var clazzName = ""
+        var testName = ""
+        args.forEachIndexed { i, arg -> 
+            if (i == 0) {
+                clazzName = arg
+            } else {
+                testName += arg + " "
+            }
+        }
+
+        return Cmd(clazzName, testName.trim())
+    }
+} 
+
 fun main(args: Array<String>) {
     Logger.load("/log.conf")
     Logger.level = Level.OFF
-    val path = args.firstOrNull() ?: "/"
-    ClassLoader.findTestClasses(path)
+
+    if (args.isEmpty()) {
+        ClassLoader.findTestClasses("/")
+    } else {
+        val cmd = Cli.parse(args)
+            println("Running test ${cmd.testName} in class ${cmd.className}")
+            ClassLoader.runTest(cmd.className, cmd.testName)
+        }
+    }
 }
 
 @Target(AnnotationTarget.FUNCTION) 
 annotation class Test
-
 
 //         
 data class TestResult(private val name: String, private val success: Boolean, private val time: Long) {
@@ -32,13 +56,19 @@ data class TestResult(private val name: String, private val success: Boolean, pr
 
 object ClassLoader {
 
-    fun runTest(className: String, testName: String): Result<TestResult, Throwable> {
+    fun runTest(className: String, testName: String) {
         val testClass = Class.forName(className)
-        return testClass.methods
+        val clazz = testClass .getDeclaredConstructor().newInstance()
+        val res = clazz::class.java.methods
             .filter { it.isTest() }
             .filter { it.name == testName }
-            .singleOrNull()?.let { test -> testClass.runTest(test) }
+            .singleOrNull()?.let { test -> clazz.runTest(test) }
             ?: Result.Err(IllegalArgumentException("Test $testName not found in class $className"))
+
+        when(res) {
+            is Result.Ok -> println(res.value)
+            is Result.Err -> println(res.error)
+        } 
     }
 
     private fun Any.runTest(method: Method): Result<TestResult, Throwable> {
@@ -68,10 +98,6 @@ object ClassLoader {
             }
             .filter { (_, clazz) -> clazz.hasTests() }
             .forEach { (classname, clazz) ->
-                // println("classname".light_gray_text())
-                //
-                // val line = "".gray_text() + " $classname ".light_gray_text() + "".gray_text()
-                // println("          ".gray_bg() + line + "          ".gray_bg())
                 println("".text(Color.GRAY) + classname.bg(Color.GRAY).text(Color.LIGHT_GRAY) + "".text(Color.GRAY))
 
                 val c = clazz.getDeclaredConstructor().newInstance()
