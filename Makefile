@@ -30,11 +30,17 @@ update: $(CLASS)
 
 %.class: %.kt 
 	echo $<
-	# @echo "#!/bin/bash\n\nset -e\n\njava -Dfile.encoding=UTF-8 -Dsun.stdout.encoding=UTF-8 -Dsun.stderr.encoding=UTF-8 -cp .build/:${LIBS}:${RES} \$$@" >.build/run.sh
+	# @echo "#!/bin/bash\n\n#set -e\n\njava -Dfile.encoding=UTF-8 -Dsun.stdout.encoding=UTF-8 -Dsun.stderr.encoding=UTF-8 -cp .build/:${LIBS}:${RES} \$$@" >.build/run.sh
 	# @chmod +x .build/run.sh
 	# kotlinc $< -cp ${LIBS} ${COMPILE_OPT} -d .build
 
 build: libs buildsrc buildtest
+
+# DELETE ME, JUST FOR COMPILING ONE FILE
+test: .build/src/test/TesterKt.class 
+# DELETE ME, JUST FOR COMPILING ONE FILE
+.build/src/test/TesterKt.class: src/test/Tester.kt
+	kotlinc src/test/Tester.kt -cp ${LIBS}:.build/src ${COMPILE_OPT} -d .build/test
 
 buildsrc:
 	@mkdir -p .build/src

@@ -60,7 +60,7 @@ class JsonParserTest {
         // TODO: assert
     }
 
-    private data class Person(
+    internal data class Person(
         val name: Name,
         val age: Int,
         val alive: Boolean,
@@ -88,7 +88,7 @@ class JsonParserTest {
             )
     }
 
-    private data class Name(val first: String, val last: String) {
+    internal data class Name(val first: String, val last: String) {
         companion object {
             fun from(map: Json): Name {
                 val name: Json by map
