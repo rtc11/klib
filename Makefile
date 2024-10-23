@@ -20,39 +20,30 @@ TEST_CLASS  := $(TEST_BIN:%=.build/%.class)
 
 COMPILE_OPT := -Xuse-fast-jar-file-system -Xenable-incremental-compilation -Xno-optimize
 
-print:
-	@echo $(CLASS)
-
 update: $(CLASS)
 
-.build/src/serde/%.class: %.kt 
+.build/%.class: %.kt 
 	echo $<
 
 %.class: %.kt 
 	echo $<
 	# @echo "#!/bin/bash\n\n#set -e\n\njava -Dfile.encoding=UTF-8 -Dsun.stdout.encoding=UTF-8 -Dsun.stderr.encoding=UTF-8 -cp .build/:${LIBS}:${RES} \$$@" >.build/run.sh
 	# @chmod +x .build/run.sh
-	# kotlinc $< -cp ${LIBS} ${COMPILE_OPT} -d .build
+	# kotlinc $< -cp ${LIBS}:.build/src:.build/test ${COMPILE_OPT} -d .build
 
 build: libs buildsrc buildtest
 
-# DELETE ME, JUST FOR COMPILING ONE FILE
-test: .build/src/test/TesterKt.class 
-# DELETE ME, JUST FOR COMPILING ONE FILE
-.build/src/test/TesterKt.class: src/test/Tester.kt
-	@kotlinc src/test/Tester.kt -cp ${LIBS}:.build/src ${COMPILE_OPT} -d .build/test
-
 buildsrc:
 	@mkdir -p .build/src
-	@echo "#!/bin/bash\n\nset -e\n\njava -Dfile.encoding=UTF-8 -Dsun.stdout.encoding=UTF-8 -Dsun.stderr.encoding=UTF-8 -cp .build/src/:${LIBS}:${RES} \$$@" >.build/src/run.sh
-	@chmod +x .build/src/run.sh
-	kotlinc $(SRC) -cp ${LIBS} ${COMPILE_OPT} -d .build/src
+	# @echo "#!/bin/bash\n\nset -e\n\njava -Dfile.encoding=UTF-8 -Dsun.stdout.encoding=UTF-8 -Dsun.stderr.encoding=UTF-8 -cp .build/src/:${LIBS}:${RES} \$$@" >run.sh
+	# @chmod +x run.sh
+	@kotlinc $(SRC) -cp ${LIBS} ${COMPILE_OPT} -d .build/src
 
 buildtest:
 	@mkdir -p .build/test
-	@echo "#!/bin/bash\n\nset -e\n\njava -Dfile.encoding=UTF-8 -Dsun.stdout.encoding=UTF-8 -Dsun.stderr.encoding=UTF-8 -cp .build/test/:.build/src/:${LIBS}:${RES} \$$@" >.build/test/run.sh
-	@chmod +x .build/test/run.sh
-	kotlinc $(TEST) -cp ${LIBS}:.build/src ${COMPILE_OPT} -d .build/test
+	@echo "#!/bin/bash\n\nset -e\n\njava -Dfile.encoding=UTF-8 -Dsun.stdout.encoding=UTF-8 -Dsun.stderr.encoding=UTF-8 -cp .build/test/:.build/src/:${LIBS}:${RES} test.TesterKt \$$@" >test.sh
+	@chmod +x test.sh
+	@kotlinc $(TEST) -cp ${LIBS}:.build/src ${COMPILE_OPT} -d .build/test
 
 libs: .libs/cached.txt
 
