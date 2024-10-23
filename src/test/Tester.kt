@@ -6,34 +6,34 @@ import java.lang.reflect.Method
 import kotlin.io.println
 import util.*
 
-data class Cmd(val className: String, val testName: String)
+data class CliRes(val arg1: String, val arg2: String)
 
-object Cli { 
-    fun parse(args: Array<String>): Cmd {
-        var clazzName = ""
-        var testName = ""
-        args.forEachIndexed { i, arg -> 
-            if (i == 0) {
-                clazzName = arg
-            } else {
-                testName += arg + " "
-            }
+private fun parse(args: Array<String>): CliRes {
+    var arg1 = ""
+    var arg2 = ""
+    args.forEachIndexed { i, arg -> 
+        when (i == 0) {
+            true -> arg1 = arg
+            false -> arg2 += arg + " "
         }
-
-        return Cmd(clazzName, testName.trim())
     }
-} 
+
+    return CliRes(arg1, arg2.trim())
+}
 
 fun main(args: Array<String>) {
     Logger.load("/log.conf")
     Logger.level = Level.OFF
 
     if (args.isEmpty()) {
-        ClassLoader.findTestClasses("/")
+        ClassLoader.runAllTests("/")
     } else {
-        val cmd = Cli.parse(args)
-        println("Running test ${cmd.testName} in class ${cmd.className}")
-        ClassLoader.runTest(cmd.className, cmd.testName)
+        val cmd = parse(args)
+        if (cmd.arg2.isEmpty()) {
+            ClassLoader.runTests(cmd.arg1)
+        } else {
+            ClassLoader.runTest(cmd.arg1, cmd.arg2)
+        }
     }
 }
 
@@ -70,22 +70,16 @@ object ClassLoader {
         } 
     }
 
-    private fun Any.runTest(method: Method): Result<TestResult, Throwable> {
-        val start = System.nanoTime()
-        return try {
-            method.invoke(this)
-            Result.Ok(TestResult(method.name, true, start.stop()))
-        } catch (e: AssertionError) {
-            Result.Ok(TestResult(method.name, false, start.stop()))
-        } catch (e: Exception) {
-            when (e.cause) {
-                is AssertionError -> Result.Ok(TestResult(method.name, false, start.stop()))
-                else -> Result.Err(e)
-            }
-        }
+    fun runTests(className: String) {
+        val testClass = Class.forName(className)
+        val clazz = testClass .getDeclaredConstructor().newInstance()
+        val res = clazz::class.java.methods.filter { it.isTest() }.map { test -> clazz.runTest(test) }
+
+        res.filterOk().forEach { result -> println(result) }
+        res.filterErr().forEach { err -> println(err) }
     }
 
-    fun findTestClasses(path: String = "/") {
+    fun runAllTests(path: String = "/") {
         val url = Resource.url(path)
         val dir = File(url.file)
         dir.walk()
@@ -108,6 +102,21 @@ object ClassLoader {
                 res.filterErr().forEach { err -> println(err) }
             }
     }
+
+    private fun Any.runTest(method: Method): Result<TestResult, Throwable> {
+        val start = System.nanoTime()
+        return try {
+            method.invoke(this)
+            Result.Ok(TestResult(method.name, true, start.stop()))
+        } catch (e: AssertionError) {
+            Result.Ok(TestResult(method.name, false, start.stop()))
+        // } catch (e: Exception) {
+        //     when (e.cause) {
+        //         is AssertionError -> Result.Ok(TestResult(method.name, false, start.stop())) 
+        //         else -> Result.Err(e)
+        }
+    }
+
 }
 
 data class Color(val r: Int, val b: Int, val g: Int) {

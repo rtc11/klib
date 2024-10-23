@@ -2,30 +2,30 @@ package util
 
 class Cli(private val args: Array<String>) {
     private var pos = 0
-    private var readPos = 0
-    private var arg: String = ""
+    private var arg: String = args.getOrElse(pos) { "" }
 
-    private fun hasNext() = pos < args.size
+    private fun hasNext() = pos + 1 < args.size 
 
     fun parse(): List<Cmd> = buildList {
-        while (hasNext()) {
-            add(next())
+        while (true) {
+            next()?.let { add(it) } 
+                ?: break
         }
     }
 
-    fun next(): Cmd {
+    fun next(): Cmd? {
         val cmd = when {
-            arg.isEmpty() -> Cmd.empty
+            arg.isEmpty() -> null
             arg.startsWith("-") -> {
-                if (peekArg().contains("-")) {
-                    Cmd.flag(arg)
+                if (peekArg().isBlank() || peekArg().startsWith("-")) {
+                    Cmd.Flag(arg)
                 } else {
                     val flag = arg
                     val value = readValue()
-                    Cmd.flagWithValue(flag, value)
+                    Cmd.FlagWithValue(flag, value)
                 }
             }
-            else -> Cmd.value(arg)
+            else -> null
         }
         read()
         return cmd
@@ -33,26 +33,24 @@ class Cli(private val args: Array<String>) {
 
     private fun readValue(): String = buildString {
         while (arg.isNotBlank()) {
-            append(arg)
             when (peekArg().startsWith("-")) {
                 true -> break
-                false -> read()
+                false -> read() // todo: trenger jeg å sjekke peekArg().isBlank()?
             }
+            append("$arg ")
         }
-    }
+    }.trim() // remove last space
 
     private fun read() {
         arg = peekArg()
-        pos = readPos++
+        pos++
     }
 
-    private fun peekArg() = args.getOrElse(readPos) { "" }
-
+    private fun peekArg(): String = args.getOrElse(pos+1) { "" }
 }
 
 sealed interface Cmd {
-    data class value(val value: String): Cmd
-    data class flag(val flag: String): Cmd
-    data class flagWithValue(val flag: String, val value: String): Cmd
-    data object empty: Cmd
+    data class Flag(val flag: String): Cmd
+    data class FlagWithValue(val flag: String, val value: String): Cmd
 }
+

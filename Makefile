@@ -40,7 +40,7 @@ build: libs buildsrc buildtest
 test: .build/src/test/TesterKt.class 
 # DELETE ME, JUST FOR COMPILING ONE FILE
 .build/src/test/TesterKt.class: src/test/Tester.kt
-	kotlinc src/test/Tester.kt -cp ${LIBS}:.build/src ${COMPILE_OPT} -d .build/test
+	@kotlinc src/test/Tester.kt -cp ${LIBS}:.build/src ${COMPILE_OPT} -d .build/test
 
 buildsrc:
 	@mkdir -p .build/src
