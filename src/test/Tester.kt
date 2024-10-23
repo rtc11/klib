@@ -6,34 +6,28 @@ import java.lang.reflect.Method
 import kotlin.io.println
 import util.*
 
-data class CliRes(val arg1: String, val arg2: String)
-
-private fun parse(args: Array<String>): CliRes {
-    var arg1 = ""
-    var arg2 = ""
-    args.forEachIndexed { i, arg -> 
-        when (i == 0) {
-            true -> arg1 = arg
-            false -> arg2 += arg + " "
-        }
-    }
-
-    return CliRes(arg1, arg2.trim())
+private fun  List<Cmd>.getFlagValue(flag: String): String? {
+    return this.filterIsInstance<Cmd.FlagWithValue>().find { it.flag == flag }?.value
 }
 
 fun main(args: Array<String>) {
     Logger.load("/log.conf")
     Logger.level = Level.OFF
 
-    if (args.isEmpty()) {
-        ClassLoader.runAllTests("/")
-    } else {
-        val cmd = parse(args)
-        if (cmd.arg2.isEmpty()) {
-            ClassLoader.runTests(cmd.arg1)
-        } else {
-            ClassLoader.runTest(cmd.arg1, cmd.arg2)
-        }
+    val cmds = Commands(args).parse()
+
+    if (cmds.isEmpty()) {
+        ClassLoader.runAllTests()
+    }
+
+    cmds.getFlagValue("-p")?.let { path ->
+        ClassLoader.runAllTests(path)
+    }
+
+    cmds.getFlagValue("-c")?.let { className ->
+        cmds.getFlagValue("-t")?.let { testName ->
+            ClassLoader.runTest(className, testName)
+        } ?: ClassLoader.runTests(className)
     }
 }
 
