@@ -14,6 +14,27 @@ class CommandsTest {
     }
 
     @Test
+    fun `parse double dashed flags`() {
+        val cli = Commands(arrayOf("--version"))
+        val cmds = cli.parse()
+        assertEq(cmds.size, 1)
+        val cmd = cmds.single()
+        assertIs<Cmd.Flag>(cmd)
+        assert<Cmd.Flag>(cmd) { it.flag == "--version" }
+    }
+
+    @Test
+    fun `parse double dashed flag with value`() {
+        val cli = Commands(arrayOf("--version", "1"))
+        val cmds = cli.parse()
+        assertEq(cmds.size, 1)
+        val cmd = cmds.single()
+        assertIs<Cmd.FlagWithValue>(cmd)
+        assert<Cmd.FlagWithValue>(cmd) { it.flag == "--version" }
+        assert<Cmd.FlagWithValue>(cmd) { it.value == "1" }
+    }
+
+    @Test
     fun `parse one flag`() {
         val cli = Commands(arrayOf("-v"))
         val cmds = cli.parse()

@@ -6,9 +6,13 @@ import java.lang.reflect.Method
 import kotlin.io.println
 import util.*
 
-private fun  List<Cmd>.getFlagValue(flag: String): String? {
+private fun List<Cmd>.getFlagValue(flag: String): String? {
     return this.filterIsInstance<Cmd.FlagWithValue>().find { it.flag == flag }?.value
 }
+
+private fun List<Cmd>.hasFlag(flag: String): Boolean {
+    return this.filterIsInstance<Cmd.Flag>().any { it.flag == flag }
+} 
 
 fun main(args: Array<String>) {
     Logger.load("/log.conf")
@@ -20,8 +24,30 @@ fun main(args: Array<String>) {
         ClassLoader.runAllTests()
     }
 
+    if (cmds.hasFlag("-h")) {
+        println("Usage: test.sh [options]")
+        println("Options:")
+        println("  -h  Show this help message")
+        println("  -f  Run all tests in absolute file path")
+        println("  -p  Run all tests for package")
+        println("  -c  Run all tests in a given class")
+        println("  -t  Run a single test in a given class")
+        return
+    } 
+
+    cmds.getFlagValue("-f")?.let { path ->
+        // replace absolute file path with relative classpath
+        val className = path.split("/")
+            .dropWhile { it != "test" }.drop(1)
+            .joinToString(".")
+            .removeSuffix(".kt")
+        ClassLoader.runTests(className)
+    }
+
     cmds.getFlagValue("-p")?.let { path ->
-        ClassLoader.runAllTests(path)
+        val url = Resource.url("/${path.replace(".", "/")}")
+        val file = File(url.file)
+        ClassLoader.runAllTests(file)
     }
 
     cmds.getFlagValue("-c")?.let { className ->
@@ -73,15 +99,18 @@ object ClassLoader {
         res.filterErr().forEach { err -> println(err) }
     }
 
-    fun runAllTests(path: String = "/") {
-        val url = Resource.url(path)
-        val dir = File(url.file)
+    fun runAllTests(dir: File = File(Resource.url("/").file)) {
+        val root = File(Resource.url("/").file)
         dir.walk()
             .filter { it.extension == "class" }
             .filterNot { it.name.contains('$') }
-            .map { 
-                val qn = it.canonicalPath.removePrefix(dir.canonicalPath).removePrefix("/").replace("/", ".").removeSuffix(".class")
-                qn to Class.forName(qn) 
+            .map { file ->
+                file.canonicalPath
+                    .removePrefix(root.canonicalPath)
+                    .removePrefix("/")
+                    .replace("/", ".")
+                    .removeSuffix(".class")
+                    .let { it to Class.forName(it) }
             }
             .filter { (_, clazz) -> clazz.hasTests() }
             .forEach { (classname, clazz) ->
