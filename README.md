@@ -6,55 +6,42 @@ Strives to be simple and easy to use, with minimal dependencies..
 ## Development
 Build with Makefile, no IDE required.
 
-Build sources
-`cd src && make build`
+Build everything
+`make build`
 
-Build tests
-`cd test && make build`
+Build src
+`make buildtest`
 
-Run tests
-`make test`
+Build test
+`make buildtest`
 
-Build a library
-`make jar`
-
-Build an execuateble
-`make app`
-
-Index kotlin LSP
+Index LSP
 `make lsp`
 
-- Everyting is compiled into .build/ dir.
-- Build src and test separately.
+Build library
+`make lib`
 
+Build executable 
+`make app`
 
 ```
 .
-├── examples
-│   ├── .libs
-│   │   └── klib.jar        # symlink to src/.build/klib.jar
-│   ├── .res
-│   │   └── log.conf        # configure the logger
-│   ├── ClientExample.kt    
-│   ├── LogExample.kt       
-│   ├── ServerExample.kt    
-│   ├── libs.txt            # dependent on kotlin coroutines
-│   └── Makefile            # NO-IDE build
-├── src
-│   ├── client
-│   ├── json
-│   ├── parser
-│   ├── serde
-│   ├── server
-│   ├── util
-│   ├── libs.txt
-│   └── Makefile            # build before running tests/examples
-└── test
-    ├── json
-    ├── server
-    ├── util
-    ├── libs.txt            # dependent on junit
-    └── Makefile
+├── Makefile        # build script
+├── libs.txt        # dependencies
+├── test.sh         # test script
+├── .res            # resources
+│   └── log.conf    # log configuration
+├── test
+│   └── ...
+└── src
+    ├── client
+    ├── examples
+    ├── json
+    ├── parser
+    ├── serde
+    ├── server
+    ├── test
+    └── util
 ```
 
 # Roadmap
@@ -73,6 +60,8 @@ Index kotlin LSP
 - [x] Serializer and Deserializer
     - [x] JSON serde
     - [ ] XML serde
-- [ ] Test enginge
-- [ ] neotest adapter
+- [x] Test enginge
+    - [x] Output result to console (hide test print/log/errors in console)
+    - [ ] Output result to file (test println/log/errors console)
+- [x] neotest adapter
 
