@@ -6,23 +6,17 @@ Strives to be simple and easy to use, with minimal dependencies..
 ## Development
 Build with Makefile, no IDE required.
 
-Build everything
-`make build`
+### Build
+  - `make build`        # build everything
+  - `make buildsrc`     # build src
+  - `make buildtest`    # build test
 
-Build src
-`make buildtest`
+### Release
+  - `make lib`          # release library
+  - `make app`          # release executable
 
-Build test
-`make buildtest`
-
-Index LSP
-`make lsp`
-
-Build library
-`make lib`
-
-Build executable 
-`make app`
+### LSP
+  - `make lsp`          # Index classpath and libs for kotlin-language-server
 
 ```
 .
