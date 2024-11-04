@@ -4,9 +4,9 @@ jobs:
   build:
     permissions:
       contents: read
-      checks: read
+      checks: write
       actions: read
-      id-token: read
+      id-token: write
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
