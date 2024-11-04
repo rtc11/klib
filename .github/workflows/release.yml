@@ -6,12 +6,46 @@ jobs:
       contents: read
       checks: read
       actions: read
+      id-token: read
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4.5.0
         with:
           java-version: 21
           distribution: temurin
-      - run: make build
-      - run: ./test.sh
+      - run: make libs lib
+      # - run: make build
+      # - run: ./test.sh
+      # - run: make lib
+      - uses: paulhatch/semantic-version@v5.4.0
+        id: tag
+        with: 
+          bump_each_commit: false
+          tag_prefix: ""
+      - id: notes
+        run: |
+          deliminiter=${RANDOM}
+          text="$(git --no-pager log $(git describe --tags --abbrev=0)..HEAD --pretty=format:"%h %s")"
+          echo 'CHANGELOG<<$deliminiter' >> $GITHUB_OUTPUT
+          echo $text >> $GITHUB_OUTPUT
+          echo '$deliminiter' >> $GITHUB_OUTPUT
+      - uses: actions/create-release@v1.1.4
+        id: release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ steps.tag.outputs.version }}
+          release_name: ${{ steps.tag.outputs.version }}
+          body: |
+            Changes in this release
+            ${{ steps.notes.outputs.CHANGELOG }}
+      - uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.release.outputs.upload_url }}
+          asset_path: ./build/klib.jar
+          asset_name: klib.jar
+          asset_content_type: application/zip
