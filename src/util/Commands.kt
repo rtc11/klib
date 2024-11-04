@@ -1,5 +1,14 @@
 package util
 
+fun List<Cmd>.getFlagValue(flag: String): String? {
+    return this.filterIsInstance<Cmd.FlagWithValue>().find { it.flag == flag }?.value
+}
+
+fun List<Cmd>.hasFlag(vararg flag: String): Boolean {
+    return this.filterIsInstance<Cmd.Flag>().any { it.flag in flag }
+} 
+
+
 class Commands(private val args: Array<String>) {
     private var pos = 0
     private var arg: String = args.getOrElse(pos) { "" }

@@ -6,14 +6,6 @@ import java.lang.reflect.Method
 import kotlin.io.println
 import util.*
 
-private fun List<Cmd>.getFlagValue(flag: String): String? {
-    return this.filterIsInstance<Cmd.FlagWithValue>().find { it.flag == flag }?.value
-}
-
-private fun List<Cmd>.hasFlag(flag: String): Boolean {
-    return this.filterIsInstance<Cmd.Flag>().any { it.flag == flag }
-} 
-
 fun main(args: Array<String>) {
     Logger.load("/log.conf")
     Logger.level = Level.OFF
