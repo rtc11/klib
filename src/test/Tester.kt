@@ -33,7 +33,10 @@ fun main(args: Array<String>) {
             .dropWhile { it != "test" }.drop(1)
             .joinToString(".")
             .removeSuffix(".kt")
-        ClassLoader.runTests(className)
+
+            if(!ClassLoader.runTests(className)) {
+                System.exit(1)
+            }
     }
 
     cmds.getFlagValue("-p")?.let { path ->
@@ -43,9 +46,15 @@ fun main(args: Array<String>) {
     }
 
     cmds.getFlagValue("-c")?.let { className ->
-        cmds.getFlagValue("-t")?.let { testName ->
-            ClassLoader.runTest(className, testName)
-        } ?: ClassLoader.runTests(className)
+        cmds.getFlagValue("-t")?.let { testName -> 
+            if(!ClassLoader.runTest(className, testName)) {
+                System.exit(1)
+            }
+        } ?: {
+            if(!ClassLoader.runTests(className)) {
+                System.exit(1)
+            }
+        }
     }
 }
 
@@ -67,7 +76,7 @@ data class TestResult(private val name: String, private val success: Boolean, pr
 
 object ClassLoader {
 
-    fun runTest(className: String, testName: String) {
+    fun runTest(className: String, testName: String): Boolean {
         val testClass = Class.forName(className)
         val clazz = testClass .getDeclaredConstructor().newInstance()
         val res = clazz::class.java.methods
@@ -76,19 +85,21 @@ object ClassLoader {
             .singleOrNull()?.let { test -> clazz.runTest(test) }
             ?: Result.Err(IllegalArgumentException("Test $testName not found in class $className"))
 
-        when(res) {
-            is Result.Ok -> println(res.value)
-            is Result.Err -> println(res.error)
+        return when(res) {
+            is Result.Ok -> true.also { println(res.value) }
+            is Result.Err -> false.also { println(res.error) }
         } 
     }
 
-    fun runTests(className: String) {
+    fun runTests(className: String): Boolean {
         val testClass = Class.forName(className)
         val clazz = testClass .getDeclaredConstructor().newInstance()
         val res = clazz::class.java.methods.filter { it.isTest() }.map { test -> clazz.runTest(test) }
 
         res.filterOk().forEach { result -> println(result) }
         res.filterErr().forEach { err -> println(err) }
+
+        return res.filterErr().isEmpty()
     }
 
     fun runAllTests(dir: File = File(Resource.url("/").file)) {
@@ -115,7 +126,9 @@ object ClassLoader {
 
                 res.filterOk().forEach { result -> println(result) }
                 res.filterErr().forEach { err -> println(err) }
-            }
+
+                // res.filterErr().isEmpty()
+            }//.any { it }
     }
 
     private fun Any.runTest(method: Method): Result<TestResult, Throwable> {
