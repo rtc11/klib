@@ -121,7 +121,6 @@ class Nob(private val opts: Opts) {
             add("-Xbackend-threads=${opts.backend_threads}")
             add("-Xno-optimize")
             add("-Xuse-fast-jar-file-system")
-            add("-Xuse-k2")
             add("-Xenable-incremental-compilation")
             add("-cp")
             add(classpath)
