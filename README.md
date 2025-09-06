@@ -7,10 +7,10 @@ Strives to be simple and easy to use, with minimal dependencies..
 Build with nob.kt, no IDE required.
 
 ### Build
-  - `./nob              # build src
+  - `./nob`             # build src
 
 ### Test
-  - `./nob test         # build test and run tests. Run `./nob test -h` for help.
+  - `./nob test`        # build test and run tests. Run `./nob test -h` for help.
 
 ```
 .
