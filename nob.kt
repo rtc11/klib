@@ -40,7 +40,7 @@ fun main(args: Array<String>) {
         }
         opts.run -> nob.run_target()
         else -> 0
-    }
+}
 
     System.exit(exit_code)
 }
@@ -119,10 +119,10 @@ class Nob(private val opts: Opts) {
             add("-jvm-target")
             add(opts.jvm_version.toString())
             add("-Xbackend-threads=${opts.backend_threads}")
-            // add("-Xno-optimize")
-            // add("-Xuse-fast-jar-file-system")
-            // add("-Xuse-k2")
-            // add("-Xenable-incremental-compilation")
+            add("-Xno-optimize")
+            add("-Xuse-fast-jar-file-system")
+            add("-Xuse-k2")
+            add("-Xenable-incremental-compilation")
             add("-cp")
             add(classpath)
             if (opts.verbose) add("-verbose")
