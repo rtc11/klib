@@ -4,25 +4,18 @@ A simple kotlin library for building a simple http server and client.
 Strives to be simple and easy to use, with minimal dependencies..
 
 ## Development
-Build with Makefile, no IDE required.
+Build with nob.kt, no IDE required.
 
 ### Build
-  - `make build`        # build everything
-  - `make buildsrc`     # build src
-  - `make buildtest`    # build test
+  - `./nob              # build src
 
-### Release
-  - `make lib`          # release library
-  - `make app`          # release executable
-
-### LSP
-  - `make lsp`          # Index classpath and libs for kotlin-language-server
+### Test
+  - `./nob test         # build test and run tests. Run `./nob test -h` for help.
 
 ```
 .
-├── Makefile        # build script
-├── libs.txt        # dependencies
-├── test.sh         # test script
+├── nob             # nob bootstrap/cli
+├── nob.kt          # nob src and config
 ├── .res            # resources
 │   └── log.conf    # log configuration
 ├── test
