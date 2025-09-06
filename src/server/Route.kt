@@ -21,6 +21,7 @@ class Route(
 class Router(private val prefix: String) {
     private val routes: MutableList<Route> = mutableListOf()
     private val extensions: MutableList<Extension> = mutableListOf()
+    private val log = logger("router")
 
     internal fun lookupRoute(exchange: Exchange): Route? = routes
         .filter { route -> exchange.method == route.method || exchange.method == HEAD && route.method == GET }

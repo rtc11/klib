@@ -13,7 +13,7 @@ fun main(args: Array<String>) {
     val cmds = Commands(args).parse()
 
     if (cmds.isEmpty()) {
-        ClassLoader.runAllTests()
+        ClassLoader.runAllTests(File("out"))
     }
 
     if (cmds.hasFlag("-h")) {
@@ -40,20 +40,20 @@ fun main(args: Array<String>) {
     }
 
     cmds.getFlagValue("-p")?.let { path ->
-        val url = Resource.url("/${path.replace(".", "/")}")
-        val file = File(url.file)
-        ClassLoader.runAllTests(file)
+        val pkg_dir = File("out/${path.replace(".", File.separator)}")
+        if (!pkg_dir.exists()) {
+            println("[ERR] Package directory '${pkg_dir.absolutePath}' not found.")
+            System.exit(1)
+        }
+        ClassLoader.runAllTests(pkg_dir, File("out"))
     }
 
-    cmds.getFlagValue("-c")?.let { className ->
-        cmds.getFlagValue("-t")?.let { testName -> 
-            if(!ClassLoader.runTest(className, testName)) {
-                System.exit(1)
-            }
-        } ?: {
-            if(!ClassLoader.runTests(className)) {
-                System.exit(1)
-            }
+    cmds.getFlagValue("-c")?.let { class_name ->
+        val test_name = cmds.getFlagValue("-t")
+        if (test_name != null) {
+            if (!ClassLoader.runTest(class_name, test_name)) System.exit(1)
+        } else {
+            if (!ClassLoader.runTests(class_name)) System.exit(1)
         }
     }
 }
@@ -102,18 +102,28 @@ object ClassLoader {
         return res.filterErr().isEmpty()
     }
 
-    fun runAllTests(dir: File = File(Resource.url("/").file)) {
-        val root = File(Resource.url("/").file)
+    fun runAllTests(dir: File, root_dir: File = dir) {
         dir.walk()
             .filter { it.extension == "class" }
             .filterNot { it.name.contains('$') }
-            .map { file ->
-                file.canonicalPath
-                    .removePrefix(root.canonicalPath)
-                    .removePrefix("/")
-                    .replace("/", ".")
-                    .removeSuffix(".class")
-                    .let { it to Class.forName(it) }
+            .mapNotNull { file ->
+                try {
+                    val class_name = file.canonicalPath
+                        .removePrefix(root_dir.canonicalPath)
+                        .removePrefix(File.separator)
+                        .replace(File.separator, ".")
+                        .removeSuffix(".class")
+                    when (class_name.isBlank()) {
+                        true -> null
+                        false -> class_name to Class.forName(class_name)
+                    }
+                } catch (e: ClassNotFoundException) {
+                    println("[WARN] Class not found for file ${file.absolutePath}")
+                    null
+                } catch (e: Exception) {
+                    println("[ERR] Failed to process file ${file.absolutePath}: ${e.message}")
+                    null
+                }
             }
             .filter { (_, clazz) -> clazz.hasTests() }
             .forEach { (classname, clazz) ->

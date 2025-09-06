@@ -1,7 +1,8 @@
 #!/bin/bash
 
 set -e
-cd "$(dirname "$0")/.build"
+# cd "$(dirname "$0")/.build"
+cd "$(dirname "$0")/out"
 
 java -Dfile.encoding=UTF-8 -Dsun.stdout.encoding=UTF-8 -Dsun.stderr.encoding=UTF-8 \
 -cp \
