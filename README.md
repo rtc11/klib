@@ -12,6 +12,8 @@ Build with nob.kt, no IDE required.
 ### Test
   - `./nob test`        # build test and run tests. Run `./nob test -h` for help.
 
+![img]("showcase_test.png")
+
 ```
 .
 ├── nob             # nob bootstrap/cli
