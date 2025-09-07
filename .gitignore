@@ -1,4 +1,5 @@
 .build
 /out
+/man1
 .libs
 kls-classpath

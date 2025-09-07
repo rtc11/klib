@@ -38,6 +38,7 @@ fun main(args: Array<String>) {
             nob.compile(opts.test_dir.toFile())
             nob.run_test(args)
         }
+        opts.doc -> nob.run_doc(args)
         opts.run -> nob.run_target()
         else -> 0
 }
@@ -75,6 +76,25 @@ class Nob(private val opts: Opts) {
                 add("-cp")
                 add(opts.test_classpath())
                 add(opts.main_class(opts.main_src.toFile()))
+                args.drop(2).forEach { add(it) }
+            },
+            opts
+        )
+    }
+
+    fun run_doc(args: Array<String>): Int {
+        val main = opts.main_srcs.first { it.toFile().name == "DocGen.kt" }
+        debug("Generating doc $main")
+        return exec(
+            buildList {
+                add("java")
+                add("-Dfile.encoding=UTF-8")
+                add("-Dsun.stdout.encoding=UTF-8")
+                add("-Dsun.stderr.encoding=UTF-8")
+                if (opts.debugger) add("-agentlib:jdwp=transport=dt_socket,server=y,suspend=y,address=5005")
+                add("-cp")
+                add(opts.test_classpath())
+                add(opts.main_class(main.toFile()))
                 args.drop(2).forEach { add(it) }
             },
             opts
@@ -204,6 +224,7 @@ private fun parse_args(args: Array<String>): Opts {
         when (val arg = args.getOrNull(pos++)) {
             "debug" -> opts.debugger = true
             "test" -> opts.test = true
+            "doc" -> opts.doc = true
             null -> break
         }
     }
@@ -230,12 +251,18 @@ data class Opts(
     var debugger: Boolean = false,
     var run: Boolean = false,
     var test: Boolean = false,
+    var doc: Boolean = false,
 ) {
     val main_src: Path get() = Files.walk(src_dir)
         .filter { it.toFile().isFile() }
         .filter { it.toFile().readText().contains("fun main(") }
         .toList()
         .firstOrNull() ?: error("no main() found")
+
+    val main_srcs: List<Path> get() = Files.walk(src_dir)
+        .filter { it.toFile().isFile() }
+        .filter { it.toFile().readText().contains("fun main(") }
+        .toList()
 
     fun runtime_classpath(): String {
         val libs_paths = libs.filter { it.scope == "compile" || it.scope == "runtime" }
@@ -272,7 +299,8 @@ data class Opts(
 
     fun main_class(src: File): String { 
         val pkg = src.useLines { lines -> lines.firstOrNull { it.trim().startsWith("package ") }?.removePrefix("package ")?.trim() }
-        val main = src.toPath().fileName.toString().removeSuffix(".kt").lowercase().replaceFirstChar{ it.uppercase() } + "Kt"
+        // val main = src.toPath().fileName.toString().removeSuffix(".kt").lowercase().replaceFirstChar{ it.uppercase() } + "Kt"
+        val main = src.toPath().fileName.toString().removeSuffix(".kt").replaceFirstChar{ it.uppercase() } + "Kt"
         return when (pkg) {
             null -> "$main"
             else -> "$pkg.$main"
