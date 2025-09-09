@@ -14,6 +14,11 @@ Build with nob.kt, no IDE required.
 
 ![img](showcase_test.png)
 
+### DocGen
+Generate man-pages, example for these two files: 
+> ./nob doc src/doc/DocGen.kt src/doc/KotlinParser.kt
+Will output man1/docgen.1 and man1/kotlinparser.1
+
 ```
 .
 ├── nob             # nob bootstrap/cli
@@ -37,6 +42,12 @@ Build with nob.kt, no IDE required.
 - [x] HTTP Client
 - [x] HTTP Server
 - [x] IDE independent builds
+- [ ] generate man pages for kdoc
+    - [x] summarize from file containing main()
+    - [x] list class, data class, data object, object
+    - [x] list functions
+    - [ ] list global constants
+    - [x] generate one page per source-file
 - [ ] JDBC driver (postgres)
 - [x] Logging support
     - [x] Console log
