@@ -40,7 +40,7 @@ fun <S : State, T> (S.() -> T).parseToEnd(input: String, state: S): Result<Parse
 }
 
 open class State {
-    internal lateinit var input: String
+    lateinit var input: String
     var pos: Int = 0
 
     val next: Char
@@ -61,13 +61,13 @@ open class State {
         }
     }
 
-    fun char(): Char = when (pos >= input.length) {
-        true -> fail("Expected char, got EOF.")
+    fun char(): Char = when (pos >= input.length) { 
+        true -> fail("Expected char, got EOF.") 
         false -> input[pos++]
     }
 
     fun char(vararg expected: Char): Char = when (next !in expected && expected.isNotEmpty()) {
-        true -> fail("Expected on of ${expected.joinToString()}, but got '$next'")
+        true -> fail("Expected one of ${expected.joinToString()}, but got '$next'")
         false -> char()
     }
 
@@ -88,6 +88,21 @@ open class State {
         val res = pattern.matchAt(input, pos)?.value ?: fail("Expected pattern '$pattern', got no match.")
         pos += res.length
         return res
+    }
+
+    fun takeUntilOneOf(vararg delimiters: String): String {
+        val start = pos
+        var currentMatch = ""
+        while (pos < input.length) {
+            val char = input[pos]
+            currentMatch += char
+            pos++
+            if (delimiters.any { d -> currentMatch.trimEnd().endsWith(d.trimEnd()) }) {
+                pos = start + currentMatch.lastIndexOf(currentMatch.trimEnd().last()) + 1
+                return input.substring(start, pos - currentMatch.length) + currentMatch.trimEnd()
+            }
+        }
+        fail("No delimiter found.")
     }
 
     fun fail(msg: String): Nothing {

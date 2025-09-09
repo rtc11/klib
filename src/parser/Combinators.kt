@@ -67,6 +67,30 @@ fun <T> State.oneOf(vararg parsers: Pair<String, Parser<T>>): T {
     fail("Expected one of $alts.")
 }
 
+fun <T> optional(p: Parser<T>): Parser<T?> = parser {
+    val start = pos
+    try {
+        p()
+    } catch (_: ParseException) {
+        pos = start
+        null
+    }
+}
+
+fun State.takeWhile(predicate: (Char) -> Boolean): String {
+    val start = pos
+    while (pos < input.length && predicate(input[pos])) pos++
+    return input.substring(start, pos)
+}
+
+fun State.takeUntil(expected: String): String {
+    val index = input.indexOf(expected, pos)
+    if (index == -1) fail("Expected to find '$expected', but reached EOF.")
+    val result = input.substring(pos, index)
+    pos = index
+    return result
+}
+
 inline fun <T, S> State.chain1(crossinline p: Parser<T>, crossinline separator: Parser<S>): Chain<T, S> =
     atomically {
         val head = p()
