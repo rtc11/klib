@@ -17,10 +17,14 @@ Build with nob.kt, no IDE required.
 ### DocGen
 Generate man-pages, example for these two files: 
 > ./nob doc src/doc/DocGen.kt src/doc/KotlinParser.kt
+
 Will output man1/docgen.1 and man1/kotlinparser.1
+
+e.g. `man docgen`
 
 ![img](showcase_doc.png)
 
+### Project structure
 ```
 .
 ├── nob             # nob bootstrap/cli
