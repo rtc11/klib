@@ -27,27 +27,33 @@ fun main(args: Array<String>) {
     var nob = Nob(opts)
     nob.rebuild_urself(args)
 
-    val libs = listOf(
+    nob.resolve(
         Lib.of("org.jetbrains.kotlinx:kotlinx-coroutines-core-jvm:1.10.2"),
     )
-    nob = Nob(opts.copy(libs = solve_libs(opts, libs)))
-    var exit_code =  nob.compile(opts.src_dir.toFile())
 
-    exit_code = when {
+    when {
         opts.test -> {
             nob.compile(opts.test_dir.toFile())
             nob.run_test(args)
         }
-        opts.doc -> nob.run_doc(args)
         opts.run -> nob.run_target()
-        else -> 0
-}
+        opts.doc -> nob.run_doc(args)
+        else -> nob.compile(opts.src_dir.toFile())
+    }
 
-    System.exit(exit_code)
+    nob.exit()
 }
 
 class Nob(private val opts: Opts) {
-    fun compile(src: File): Int {
+    private var exit_code = 0
+    fun exit() = System.exit(exit_code)
+
+    fun resolve(vararg libs: Lib) {
+        opts.libs = solve_libs(opts, libs.toList())
+    }
+
+    fun compile(src: File) {
+        val start_time = System.nanoTime()
         val files = when {
             src.isFile() -> listOf(src)
             src.isDirectory() -> src.walkTopDown().filter { it.isFile && it.toString().endsWith(".kt") }.toList()
@@ -59,14 +65,14 @@ class Nob(private val opts: Opts) {
             val compiled_file = get_compiled_file(file)
             !compiled_file.exists() || Files.getLastModifiedTime(file.toPath()).toInstant() > Files.getLastModifiedTime(compiled_file.toPath()).toInstant()
         }
-        if (files_to_compile.isEmpty()) return 0
-        // return compile_with_daemon(files_to_compile) 
-        return compile_with_daemon(files) 
+        // TODO: only compile the changed files with their dependents
+        if (!files_to_compile.isEmpty()) compile_with_daemon(files) 
+        info("Compiled ${files.map{it.name}} in " + TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start_time) + " ms")
     }
 
-    fun run_test(args: Array<String>): Int {
-        debug("Testing ${opts.main_src}")
-        return exec(
+    fun run_test(args: Array<String>) {
+        if (opts.verbose) info("Testing ${opts.main_src}")
+        exec(
             buildList {
                 add("java")
                 add("-Dfile.encoding=UTF-8")
@@ -78,32 +84,12 @@ class Nob(private val opts: Opts) {
                 add(opts.main_class(opts.main_src.toFile()))
                 args.drop(2).forEach { add(it) }
             },
-            opts
         )
     }
 
-    fun run_doc(args: Array<String>): Int {
-        val main = opts.main_srcs.first { it.toFile().name == "DocGen.kt" }
-        debug("Generating doc $main")
-        return exec(
-            buildList {
-                add("java")
-                add("-Dfile.encoding=UTF-8")
-                add("-Dsun.stdout.encoding=UTF-8")
-                add("-Dsun.stderr.encoding=UTF-8")
-                if (opts.debug) add("-agentlib:jdwp=transport=dt_socket,server=y,suspend=y,address=5005")
-                add("-cp")
-                add(opts.test_classpath())
-                add(opts.main_class(main.toFile()))
-                args.drop(2).forEach { add(it) }
-            },
-            opts
-        )
-    }
-
-    fun run_target(): Int {
-        debug("Running ${opts.main_src}")
-        return exec(
+    fun run_target() {
+        if (opts.verbose) info("Running ${opts.main_src}")
+        exec(
             buildList {
                 add("java")
                 add("-Dfile.encoding=UTF-8")
@@ -114,20 +100,19 @@ class Nob(private val opts: Opts) {
                 add(opts.runtime_classpath())
                 add(opts.main_class(opts.main_src.toFile()))
             },
-            opts
         )
     }
 
-    // fun release(): Int {
-    //     val opts = opts.copy(debug = false, error = true)
-    //     val name = opts.name(opts.src_file)
-    //     val cmd = listOf("jar", "cfe", "${name}.jar", "${name}Kt", "-C", "${opts.target_dir}", ".")
-    //     if (opts.verbose) info("$cmd")
-    //     info("package ${name}.jar")
-    //     return exec(cmd, opts)
-    // }
+    fun exec(cmd: List<String>) {
+        if (opts.verbose) info(cmd.joinToString(" "))
+        val builder = ProcessBuilder(cmd)
+        builder.inheritIO()
+        builder.directory(File(opts.cwd))
+        val process = builder.start()
+        exit_code = process.waitFor()
+    }
 
-    fun compile_with_daemon(files: List<File>): Int {
+    private fun compile_with_daemon(files: List<File>) {
         val compiler_id = CompilerId.makeCompilerId(Files.list(opts.kotlin_dir).filter { it.toString().endsWith(".jar") }.map { it.toFile() }.toList())
         val client_alive_file = opts.target_dir.resolve(".alive").toFile().apply { if (!exists()) createNewFile() }
 
@@ -153,7 +138,7 @@ class Nob(private val opts: Opts) {
             if (opts.error) add("-Werror")
             files.forEach { add(it.absolutePath) }
         }
-        debug("kotlinc ${args.joinToString(" ")}")
+        if (opts.verbose) info("kotlinc ${args.joinToString(" ")}")
 
         val daemon_reports = arrayListOf<DaemonReportMessage>()
 
@@ -171,8 +156,8 @@ class Nob(private val opts: Opts) {
 
         val session_id = daemon.leaseCompileSession(client_alive_file.absolutePath).get()
         try {
-            val start_time = System.nanoTime()
-            val exit_code = KotlinCompilerClient.compile(
+            // val start_time = System.nanoTime()
+            exit_code = KotlinCompilerClient.compile(
                 compilerService = daemon,
                 sessionId = session_id,
                 targetPlatform = CompileService.TargetPlatform.JVM,
@@ -181,9 +166,8 @@ class Nob(private val opts: Opts) {
                 compilerMode = CompilerMode.NON_INCREMENTAL_COMPILER,
                 reportSeverity = ReportSeverity.INFO,
             )
-            val end_time = System.nanoTime()
-            info("Compiled ${files.map{it.name}} in " + TimeUnit.NANOSECONDS.toMillis(end_time - start_time) + " ms")
-            return exit_code
+            // val end_time = System.nanoTime()
+            // info("Compiled ${files.map{it.name}} in " + TimeUnit.NANOSECONDS.toMillis(end_time - start_time) + " ms")
         } finally {
             daemon.releaseCompileSession(session_id) 
         }
@@ -196,9 +180,8 @@ class Nob(private val opts: Opts) {
             .let { File(it.toFile().absolutePath + ".class").toPath() }
 
         if(Files.getLastModifiedTime(opts.nob_src).toInstant() > Files.getLastModifiedTime(nob_class_file).toInstant()) {
-            val exit_code = compile(opts.nob_src.toFile())
+            compile(opts.nob_src.toFile())
 
-            // Re-execute with the new class
             ProcessBuilder(
                 "java",
                 "-cp", "out:${System.getProperty("java.class.path")}",
@@ -206,8 +189,7 @@ class Nob(private val opts: Opts) {
                 *args
             ).inheritIO().start().waitFor()
 
-            // Exit this process to prevent running the outdated version
-            System.exit(exit_code)
+            exit()
         } 
     }
 
@@ -218,6 +200,23 @@ class Nob(private val opts: Opts) {
         return opts.target_dir.resolve(package_path).resolve("$class_name.class").toFile()
     }
 
+    fun run_doc(args: Array<String>) {
+        val main = opts.main_srcs.first { it.toFile().name == "DocGen.kt" }
+        if (opts.verbose) info("Generating doc $main")
+        exec(
+            buildList {
+                add("java")
+                add("-Dfile.encoding=UTF-8")
+                add("-Dsun.stdout.encoding=UTF-8")
+                add("-Dsun.stderr.encoding=UTF-8")
+                if (opts.debug) add("-agentlib:jdwp=transport=dt_socket,server=y,suspend=y,address=5005")
+                add("-cp")
+                add(opts.test_classpath())
+                add(opts.main_class(main.toFile()))
+                args.drop(2).forEach { add(it) }
+            },
+        )
+    }
 }
 
 private fun parse_args(args: Array<String>): Opts {
@@ -236,22 +235,22 @@ private fun parse_args(args: Array<String>): Opts {
 }
 
 data class Opts(
-    val cwd: String = System.getProperty("user.dir"),
-    val src_dir: Path = Paths.get(cwd, "src"),
-    val test_dir: Path = Paths.get(cwd, "test"),
-    val target_dir: Path = Paths.get(cwd, "out").also { it.toFile().mkdirs() },
-    val kotlin_dir: Path = Paths.get(System.getProperty("KOTLIN_HOME"), "libexec", "lib"), // TODO: default not working
-    val nob_src: Path = Paths.get(cwd, "nob.kt"),
+    var cwd: String = System.getProperty("user.dir"),
+    var src_dir: Path = Paths.get(cwd, "src"),
+    var test_dir: Path = Paths.get(cwd, "test"),
+    var target_dir: Path = Paths.get(cwd, "out").also { it.toFile().mkdirs() },
+    var kotlin_dir: Path = Paths.get(System.getProperty("KOTLIN_HOME"), "libexec", "lib"), // TODO: default not working
+    var nob_src: Path = Paths.get(cwd, "nob.kt"),
 
-    val libs: List<Lib> = emptyList(),
-    val jvm_version: Int = 21,
-    val kotlin_version: String = "2.2.0",
+    var libs: List<Lib> = emptyList(),
+    var jvm_version: Int = 21,
+    var kotlin_version: String = "2.2.0",
 
-    val backend_threads: Int = 0, // run codegen with N thread per processor (Default 1)
-    val verbose: Boolean = false,
+    var backend_threads: Int = 0, // run codegen with N thread per processor (Default 1)
+    var verbose: Boolean = false,
     var debug: Boolean = false,
-    val error: Boolean = true,
-    val extra: Boolean = false,
+    var error: Boolean = true,
+    var extra: Boolean = false,
     var run: Boolean = false,
     var test: Boolean = false,
     var doc: Boolean = false,
@@ -351,16 +350,6 @@ data class Lib(
     }
 }
 
-private fun exec(cmd: List<String>, opts: Opts): Int {
-    debug("exec: ${cmd.joinToString(" ")}")
-    val builder = ProcessBuilder(cmd)
-    builder.inheritIO()
-    builder.directory(File(opts.cwd))
-    val process = builder.start()
-    return process.waitFor()
-}
-
-
 private fun download_file(url: URI, file: File) {
     if (file.exists()) {
         debug("download $url ${color("[CACHE]", Color.yellow)}")
@@ -427,10 +416,10 @@ private fun solve_libs(opts: Opts, libs: List<Lib>): List<Lib> {
         }
 
         save_cache(cache_file, resolved)
+        val end_time = System.nanoTime()
+        info("Resolved ${resolved.size} libs in " + TimeUnit.NANOSECONDS.toMillis(end_time - start_time) + " ms")
     }
 
-    val end_time = System.nanoTime()
-    info("Resolved ${resolved.size} libs in " + TimeUnit.NANOSECONDS.toMillis(end_time - start_time) + " ms")
     return resolved.map { it.lib }.resolve_kotlin_libs(opts)
 }
 
