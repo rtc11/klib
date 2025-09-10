@@ -72,7 +72,7 @@ class Nob(private val opts: Opts) {
                 add("-Dfile.encoding=UTF-8")
                 add("-Dsun.stdout.encoding=UTF-8")
                 add("-Dsun.stderr.encoding=UTF-8")
-                if (opts.debugger) add("-agentlib:jdwp=transport=dt_socket,server=y,suspend=y,address=5005")
+                if (opts.debug) add("-agentlib:jdwp=transport=dt_socket,server=y,suspend=y,address=5005")
                 add("-cp")
                 add(opts.test_classpath())
                 add(opts.main_class(opts.main_src.toFile()))
@@ -91,7 +91,7 @@ class Nob(private val opts: Opts) {
                 add("-Dfile.encoding=UTF-8")
                 add("-Dsun.stdout.encoding=UTF-8")
                 add("-Dsun.stderr.encoding=UTF-8")
-                if (opts.debugger) add("-agentlib:jdwp=transport=dt_socket,server=y,suspend=y,address=5005")
+                if (opts.debug) add("-agentlib:jdwp=transport=dt_socket,server=y,suspend=y,address=5005")
                 add("-cp")
                 add(opts.test_classpath())
                 add(opts.main_class(main.toFile()))
@@ -106,7 +106,10 @@ class Nob(private val opts: Opts) {
         return exec(
             buildList {
                 add("java")
-                if (opts.debugger) add("-agentlib:jdwp=transport=dt_socket,server=y,suspend=y,address=5005")
+                add("-Dfile.encoding=UTF-8")
+                add("-Dsun.stdout.encoding=UTF-8")
+                add("-Dsun.stderr.encoding=UTF-8")
+                if (opts.debug) add("-agentlib:jdwp=transport=dt_socket,server=y,suspend=y,address=5005")
                 add("-cp")
                 add(opts.runtime_classpath())
                 add(opts.main_class(opts.main_src.toFile()))
@@ -139,7 +142,7 @@ class Nob(private val opts: Opts) {
             add("-jvm-target")
             add(opts.jvm_version.toString())
             add("-Xbackend-threads=${opts.backend_threads}")
-            add("-Xno-optimize")
+            if (!opts.debug) add("-Xno-optimize")
             add("-Xuse-fast-jar-file-system")
             add("-Xenable-incremental-compilation")
             add("-cp")
@@ -222,7 +225,8 @@ private fun parse_args(args: Array<String>): Opts {
     var opts = Opts(kotlin_dir = args.get(pos++).let(Paths::get))
     while(true) {
         when (val arg = args.getOrNull(pos++)) {
-            "debug" -> opts.debugger = true
+            "debug" -> { opts.debug = true; opts.run = true }
+            "run" -> opts.run = true
             "test" -> opts.test = true
             "doc" -> opts.doc = true
             null -> break
@@ -245,10 +249,9 @@ data class Opts(
 
     val backend_threads: Int = 0, // run codegen with N thread per processor (Default 1)
     val verbose: Boolean = false,
-    val debug: Boolean = false,
+    var debug: Boolean = false,
     val error: Boolean = true,
     val extra: Boolean = false,
-    var debugger: Boolean = false,
     var run: Boolean = false,
     var test: Boolean = false,
     var doc: Boolean = false,
