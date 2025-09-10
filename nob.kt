@@ -33,6 +33,7 @@ fun main(args: Array<String>) {
 
     when {
         opts.test -> {
+            nob.compile(opts.src_dir.toFile())
             nob.compile(opts.test_dir.toFile())
             nob.run_test(args)
         }

@@ -2,9 +2,9 @@ package test
 
 class AssertionError(message: String) : Exception(message)
 
-fun assertEq(expected: Any, actual: Any) {
-    if (expected != actual) {
-        throw AssertionError("Expected $expected but got $actual")
+fun assertEq(left: Any, right: Any) {
+    if (left != right) {
+        throw AssertionError("$left != $right")
     }
 }
 
@@ -25,7 +25,7 @@ inline fun <reified T: Any> assert(it: Any, predicate: (T) -> Boolean) {
 
 inline fun <reified T: Any> assertIs(actual: Any) {
     if (actual !is T) {
-        throw AssertionError("Expected $actual to be of type ${T::class}")
+        throw AssertionError("$actual != ${T::class}")
     }
 }
 

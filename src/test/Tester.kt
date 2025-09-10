@@ -5,6 +5,7 @@ import java.util.logging.Level
 import java.lang.reflect.Method
 import kotlin.io.println
 import util.*
+import java.lang.reflect.InvocationTargetException
 
 fun main(args: Array<String>) {
     Logger.load("/log.conf")
@@ -28,7 +29,6 @@ fun main(args: Array<String>) {
     } 
 
     cmds.getFlagValue("-f")?.let { path ->
-        // replace absolute file path with relative classpath
         val className = path.split("/")
             .dropWhile { it != "test" }.drop(1)
             .joinToString(".")
@@ -58,11 +58,19 @@ fun main(args: Array<String>) {
     }
 }
 
-@Target(AnnotationTarget.FUNCTION) 
-annotation class Test
+@Target(AnnotationTarget.FUNCTION) annotation class Test
+@Target(AnnotationTarget.FUNCTION) annotation class Before
+@Target(AnnotationTarget.FUNCTION) annotation class After
+@Target(AnnotationTarget.FUNCTION) annotation class Between
 
 //         
-data class TestResult(private val name: String, private val success: Boolean, private val time: Long) {
+data class TestResult(
+    private val name: String,
+    private val success: Boolean,
+    private val time: Long,
+    private val msg: String? = null,
+    private val loc: String? = null,
+) {
     private fun status(): String = when (success) {
         true -> "".text(Color.GREEN) + "PASS".bg(Color.GREEN).text(Color.GRAY) + "".text(Color.GREEN)
         false -> "".text(Color.RED) + "FAIL".bg(Color.RED).text(Color.GRAY) + "".text(Color.RED)
@@ -71,7 +79,15 @@ data class TestResult(private val name: String, private val success: Boolean, pr
     private fun time(): String = "${time/1_000_000} ms".padEnd(9, ' ').text(Color.YELLOW)
     private fun name(): String = "$name ".padEnd(40, '˒').text(Color.WHITE)
 
-    override fun toString(): String = " ${time()} ${name()} ${status()}"
+    override fun toString(): String {
+        return buildString {
+            append(" ${time()} ${name()} ${status()}")
+            if (!success) {
+                if (msg != null) append("\n".padEnd(12, ' ') + msg.text(Color.LIGHT_GRAY))
+                if (loc != null) append("\n".padEnd(12, ' ') + loc.text(Color.LIGHT_GRAY))
+            }
+        }
+    }
 }
 
 object ClassLoader {
@@ -79,12 +95,15 @@ object ClassLoader {
     fun runTest(className: String, testName: String): Boolean {
         val testClass = Class.forName(className)
         val clazz = testClass .getDeclaredConstructor().newInstance()
+        val befores = clazz::class.java.methods.filter { it.is_before() }
+        val afters = clazz::class.java.methods.filter { it.is_after() }
+        befores.forEach { it(clazz) }
         val res = clazz::class.java.methods
             .filter { it.isTest() }
             .filter { it.name == testName }
-            .singleOrNull()?.let { test -> clazz.runTest(test) }
+            .singleOrNull()?.let { test -> clazz.invoke_test(test) }
             ?: Result.Err(IllegalArgumentException("Test $testName not found in class $className"))
-
+        afters.forEach { it(clazz) }
         return when(res) {
             is Result.Ok -> true.also { println(res.value) }
             is Result.Err -> false.also { println(res.error) }
@@ -94,12 +113,20 @@ object ClassLoader {
     fun runTests(className: String): Boolean {
         val testClass = Class.forName(className)
         val clazz = testClass .getDeclaredConstructor().newInstance()
-        val res = clazz::class.java.methods.filter { it.isTest() }.map { test -> clazz.runTest(test) }
-
-        res.filterOk().forEach { result -> println(result) }
-        res.filterErr().forEach { err -> println(err) }
-
-        return res.filterErr().isEmpty()
+        val befores = clazz::class.java.methods.filter { it.is_before() }
+        val betweens = clazz::class.java.methods.filter { it.is_between() }
+        val afters = clazz::class.java.methods.filter { it.is_after() }
+        val methods = clazz::class.java.methods.filter { it.isTest() }
+        val results = mutableListOf<Result<TestResult, Throwable>>()
+        befores.forEach { it(clazz) }
+        methods.forEachIndexed { idx, test ->
+            results.add(clazz.invoke_test(test))
+            if (idx < methods.size - 1) betweens.forEach { it(clazz) }
+        }
+        afters.forEach { it(clazz) }
+        results.filterOk().forEach { result -> println(result) }
+        results.filterErr().forEach { err -> println(err) }
+        return results.filterErr().isEmpty()
     }
 
     fun runAllTests(dir: File, root_dir: File = dir) {
@@ -128,33 +155,26 @@ object ClassLoader {
             .filter { (_, clazz) -> clazz.hasTests() }
             .forEach { (classname, clazz) ->
                 println("".text(Color.GRAY) + classname.bg(Color.GRAY).text(Color.LIGHT_GRAY) + "".text(Color.GRAY))
-
-                val c = clazz.getDeclaredConstructor().newInstance()
-                val res = c::class.java.methods
-                    .filter { it.isTest() }
-                    .map { test -> c.runTest(test) }
-
-                res.filterOk().forEach { result -> println(result) }
-                res.filterErr().forEach { err -> println(err) }
-
-                // res.filterErr().isEmpty()
-            }//.any { it }
+                runTests(classname)
+            }
     }
 
-    private fun Any.runTest(method: Method): Result<TestResult, Throwable> {
+    private fun Any.invoke_test(method: Method): Result<TestResult, Throwable> {
         val start = System.nanoTime()
         return try {
             method.invoke(this)
             Result.Ok(TestResult(method.name, true, start.stop()))
-        } catch (e: AssertionError) {
-            Result.Ok(TestResult(method.name, false, start.stop()))
-        // } catch (e: Exception) {
-        //     when (e.cause) {
-        //         is AssertionError -> Result.Ok(TestResult(method.name, false, start.stop())) 
-        //         else -> Result.Err(e)
+        } catch (e: Throwable) {
+            val cause = if (e is InvocationTargetException) e.cause else e
+            if (cause is AssertionError) {
+                val trace = cause.stackTrace.firstOrNull { !it.className.startsWith("test.AssertionsKt") && !it.className.startsWith("test.ClassLoader") }
+                val loc = trace?.let { "${it.fileName}:${it.lineNumber}" }
+                Result.Ok(TestResult(method.name, false, start.stop(), cause.message, loc))
+            } else {
+                Result.Err(e)
+            }
         }
     }
-
 }
 
 data class Color(val r: Int, val b: Int, val g: Int) {
@@ -175,5 +195,8 @@ private fun String.text(color: Color): String = "${ANSI24bit.fg(color.r, color.b
 private fun String.bg(color: Color): String = "${ANSI24bit.bg(color.r, color.b, color.g)}$this${ANSI24bit.reset()}"
 private fun Long.stop(): Long = (System.nanoTime() - this)
 private fun Method.isTest(): Boolean = isAnnotationPresent(Test::class.java)
+private fun Method.is_before(): Boolean = isAnnotationPresent(Before::class.java)
+private fun Method.is_after(): Boolean = isAnnotationPresent(After::class.java)
+private fun Method.is_between(): Boolean = isAnnotationPresent(Between::class.java)
 private fun Class<*>.hasTests(): Boolean = methods.any{ it.isTest() }
 
