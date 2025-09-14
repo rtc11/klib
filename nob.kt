@@ -85,25 +85,23 @@ class Nob(val opts: Opts) {
             src.isDirectory -> src.walkTopDown().filter { it.isFile && it.extension == "kt" }
             else -> emptySequence()
         }
-
-        fun relative(f: File?) = f?.let { Paths.get(opts.cwd).relativize(f.toPath()) } ?: null
-
         val has_changes = sources.any { file -> 
             val compiled = get_any_compiled_file(file)
             compiled == null || file.lastModified() > compiled.lastModified()
         }
         if (has_changes) {
             compile_with_daemon(src, classpath)
-            info("Compiled ${Paths.get(opts.cwd).relativize(src.toPath())} in " + java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start_time) + " ms")
+            pkg_dir_cache.clear()
+            pkg_cache.clear()
+            info("Compiled ${Paths.get(opts.cwd).relativize(src.toPath())} ${stop(start_time)}")
         } else {
-            info("${Paths.get(opts.cwd).relativize(src.toPath())} is up to date.")
+            info("${Paths.get(opts.cwd).relativize(src.toPath())} is up to date ${stop(start_time)}")
         }
     }
 
     fun run_test(args: Array<String>) {
         val start_time = System.nanoTime()
         val main_class = opts.main_srcs.first { it.toFile().name == "Tester.kt" }.main_class()
-        // info("Running $main_class")
         val cmd = buildList{
             add("java")
             add("-Dfile.encoding=UTF-8")
@@ -116,7 +114,7 @@ class Nob(val opts: Opts) {
             args.drop(2).forEach { add(it) }
         }
         exec(*cmd.toTypedArray())
-        info("Tests completed in " + java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start_time) + " ms")
+        info("Tests completed ${stop(start_time)}")
     }
 
     fun run_target() {
@@ -140,25 +138,25 @@ class Nob(val opts: Opts) {
         val lib_jar_file = opts.target_dir.resolve("$jar_name.jar").toFile()
         exec("jar", "cf", lib_jar_file.absolutePath, "-C", opts.target_dir.toAbsolutePath().toString(), ".")
         if (exit_code != 0) err("Failed to release $jar_name")
-        info("Released $jar_name in " + java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start_time) + " ms")
+        info("Released $jar_name ${stop(start_time)}")
     }
 
     fun release_app(jar_name: String, main_class_fq: String) {
-        val startTime = System.nanoTime()
-        val fatJarFile = opts.target_dir.resolve("$jar_name.jar").toFile()
-        val addedEntries = mutableSetOf<String>()
-        JarOutputStream(FileOutputStream(fatJarFile)).use { jar ->
+        val start_time = System.nanoTime()
+        val fat_jar_file = opts.target_dir.resolve("$jar_name.jar").toFile()
+        val added_entries = mutableSetOf<String>()
+        JarOutputStream(FileOutputStream(fat_jar_file)).use { jar ->
             val manifest = Manifest().apply {
                 mainAttributes.put(Attributes.Name.MANIFEST_VERSION, "1.0")
                 mainAttributes.put(Attributes.Name.MAIN_CLASS, main_class_fq)
             }
-            JarOutputStream(FileOutputStream(fatJarFile), manifest).use { jarStream ->
+            JarOutputStream(FileOutputStream(fat_jar_file), manifest).use { jar_stream ->
                 fun addFile(file: File, baseDir: File) {
-                    val entryName = baseDir.toPath().relativize(file.toPath()).toString().replace("\\", "/")
-                    if (addedEntries.add(entryName)) {
-                        jarStream.putNextEntry(JarEntry(entryName))
-                        file.inputStream().use { it.copyTo(jarStream) }
-                        jarStream.closeEntry()
+                    val entry_name = baseDir.toPath().relativize(file.toPath()).toString().replace("\\", "/")
+                    if (added_entries.add(entry_name)) {
+                        jar_stream.putNextEntry(JarEntry(entry_name))
+                        file.inputStream().use { it.copyTo(jar_stream) }
+                        jar_stream.closeEntry()
                     }
                 }
                 opts.target_dir.toFile().walkTopDown()
@@ -170,10 +168,10 @@ class Nob(val opts: Opts) {
                             zip.entries().asSequence().forEach { entry ->
                                 val name = entry.name
                                 if (name.startsWith("META-INF/")) return@forEach
-                                if (addedEntries.add(name)) {
-                                    jarStream.putNextEntry(JarEntry(name))
-                                    zip.getInputStream(entry).use { it.copyTo(jarStream) }
-                                    jarStream.closeEntry()
+                                if (added_entries.add(name)) {
+                                    jar_stream.putNextEntry(JarEntry(name))
+                                    zip.getInputStream(entry).use { it.copyTo(jar_stream) }
+                                    jar_stream.closeEntry()
                                 }
                             }
                         }
@@ -181,7 +179,7 @@ class Nob(val opts: Opts) {
                 }
             }
         }
-        info("Released $jar_name in " + java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startTime) + " ms → ${fatJarFile.absolutePath}")
+        info("Released $jar_name ${stop(start_time)}")
     }
 
     fun exec(vararg cmd: String) {
@@ -246,13 +244,23 @@ class Nob(val opts: Opts) {
         } 
     }
 
+    private val pkg_cache = mutableMapOf<File, String>()         // src file → package name
+    private val pkg_dir_cache = mutableMapOf<Path, List<File>>() // target package dir → compiled class files
+    private fun get_package(src: File): String? {
+        return pkg_cache.getOrPut(src) {
+            src.bufferedReader().useLines { lines -> 
+                lines.firstOrNull { it.trim().startsWith("package ") }?.removePrefix("package ")?.trim() 
+            } ?: ""
+        }.ifEmpty { null }
+    }
     private fun get_any_compiled_file(src: File): File? {
-        val base_name = src.nameWithoutExtension.replaceFirstChar { it.uppercase() }
-        val pkg = src.bufferedReader().useLines { lines ->
-            lines.firstOrNull { it.trim().startsWith("package ") }?.removePrefix("package ")?.trim()
-        }
+        val baseName = src.nameWithoutExtension.replaceFirstChar { it.uppercase() }
+        val pkg = get_package(src)
         val pkg_dir = pkg?.replace('.', File.separatorChar)?.let { opts.target_dir.resolve(it) } ?: opts.target_dir
-        return pkg_dir.toFile().listFiles()?.firstOrNull { it.name.startsWith(base_name) && it.extension == "class" }
+        val compiled_files = pkg_dir_cache.getOrPut(pkg_dir) {
+            pkg_dir.toFile().listFiles { f -> f.isFile && f.extension == "class" }?.toList() ?: emptyList()
+        }
+        return compiled_files.firstOrNull { it.name.startsWith(baseName) }
     }
 }
 
@@ -407,8 +415,7 @@ private fun solve_libs(opts: Opts, libs: List<Lib>): List<Lib> {
                 }
         }
         save_cache(cache_file, resolved)
-        val end_time = System.nanoTime()
-        info("Resolved ${resolved.size} libs in " + java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(end_time - start_time) + " ms")
+        info("Resolved ${resolved.size} libs ${stop(start_time)}")
     }
     return resolved.map { it.lib }.resolve_kotlin_libs(opts)
 }
@@ -784,8 +791,9 @@ fun info(msg: String) { println("${color("[INFO]", Color.cyan)} $msg") }
 fun warn(msg: String) { println("${color("[WARN]", Color.magenta)} $msg") }
 fun err(msg: String) { println("${color("[ERR]", Color.red)} $msg") }
 
-private fun color(text: Any, color: Color) = "${color.code}$text${Color.reset.code}" 
+fun stop(start_time: Long): String = "[${java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start_time)} ms]"
 
+private fun color(text: Any, color: Color) = "${color.code}$text${Color.reset.code}" 
 private enum class Color(val code: String) {
     red("\u001B[31m"),  green("\u001B[32m"),   yellow("\u001B[33m"),
     blue("\u001B[34m"), magenta("\u001B[35m"), cyan("\u001B[36m"),
