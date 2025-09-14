@@ -1,127 +1,197 @@
 package nob
 
 import java.io.*
-import java.lang.ProcessBuilder
-import java.net.URI
-import java.nio.file.Files
-import java.nio.file.Path
-import java.nio.file.Paths
-import java.time.Instant
+import java.nio.file.*
 import java.util.*
-import java.util.concurrent.TimeUnit
-import java.util.function.*
-import javax.xml.parsers.DocumentBuilderFactory
-import org.jetbrains.kotlin.cli.common.messages.MessageRenderer
-import org.jetbrains.kotlin.cli.common.messages.PrintingMessageCollector
+import java.util.jar.*
+import kotlin.streams.asSequence
 import org.jetbrains.kotlin.daemon.client.*
 import org.jetbrains.kotlin.daemon.common.*
-import org.w3c.dom.Document
-import org.w3c.dom.Element
-import org.w3c.dom.NodeList
-import org.w3c.dom.Node
+import org.w3c.dom.*
 
 const val DEBUG = false
 
 fun main(args: Array<String>) {
-    val opts = parse_args(args)
-    var nob = Nob(opts)
-    nob.rebuild_urself(args)
+    var nob = Nob.new(args)
 
     nob.resolve(
         Lib.of("org.jetbrains.kotlinx:kotlinx-coroutines-core-jvm:1.10.2"),
     )
 
-    when {
-        opts.test -> {
-            nob.compile(opts.src_dir.toFile())
-            nob.compile(opts.test_dir.toFile())
+    when (val cmd = Cmd.next(args)) {
+        "run" -> nob.run_target()
+        "doc" -> nob.run_doc(args)
+        "test" -> {
+            nob.compile(nob.opts.src_dirs.first().toFile(), nob.opts.compile_classpath())
+            nob.compile(nob.opts.test_dir.toFile(), nob.opts.compile_classpath())
             nob.run_test(args)
         }
-        opts.run -> nob.run_target()
-        opts.doc -> nob.run_doc(args)
-        else -> nob.compile(opts.src_dir.toFile())
+        else -> nob.compile(nob.opts.src_dirs.first().toFile(), nob.opts.compile_classpath())
     }
-
     nob.exit()
 }
 
-class Nob(private val opts: Opts) {
+fun Nob.run_doc(args: Array<String>) {
+    val main = opts.main_srcs.first { it.toFile().name == "DocGen.kt" }
+    if (opts.verbose) info("Generating doc $main")
+    val cmd = buildList {
+        add("java")
+        add("-Dfile.encoding=UTF-8")
+        add("-Dsun.stdout.encoding=UTF-8")
+        add("-Dsun.stderr.encoding=UTF-8")
+        if (opts.debug) add("-agentlib:jdwp=transport=dt_socket,server=y,suspend=y,address=5005")
+        add("-cp")
+        add(opts.test_classpath())
+        add(opts.main_class(main.toFile()))
+        args.drop(2).forEach { add(it) }
+    }
+    exec(*cmd.toTypedArray())
+}
+
+object Cmd {
+    private var pos = 1 // skip KOTLIN_HOME
+    fun next(args: Array<String>) = args.getOrNull(pos++)
+}
+
+class Nob(val opts: Opts) {
     private var exit_code = 0
+
+    companion object {
+        fun new(args: Array<String>): Nob {
+            var pos = 0
+            var opts = Opts(kotlin_dir = args.get(pos++).let(Paths::get))
+            while(true) {
+                when (val arg = args.getOrNull(pos++)) {
+                    "debug" -> opts.debug = true
+                    null -> break
+                }
+            }
+            val nob = Nob(opts)
+            nob.rebuild_urself(args)
+            return nob
+        }
+    }
+
     fun exit() = System.exit(exit_code)
 
     fun resolve(vararg libs: Lib) {
         opts.libs = solve_libs(opts, libs.toList())
     }
 
-    fun compile(src: File) {
+    fun compile(src: File, classpath: String) {
         val start_time = System.nanoTime()
         val files = when {
             src.isFile() -> listOf(src)
             src.isDirectory() -> src.walkTopDown().filter { it.isFile && it.toString().endsWith(".kt") }.toList()
             else -> emptyList()
         }
-        if (files.isEmpty()) error("no files to compile in $src")
 
-        val files_to_compile = files.filter { file ->
+        val should_compile = files.any { file ->
             val compiled_file = get_compiled_file(file)
-            !compiled_file.exists() || Files.getLastModifiedTime(file.toPath()).toInstant() > Files.getLastModifiedTime(compiled_file.toPath()).toInstant()
+            !compiled_file.exists() || Files.getLastModifiedTime(file.toPath()).toMillis() > Files.getLastModifiedTime(compiled_file.toPath()).toMillis()
         }
-        // TODO: only compile the changed files with their dependents
-        if (!files_to_compile.isEmpty()) compile_with_daemon(files) 
-        info("Compiled ${files.map{it.name}} in " + TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start_time) + " ms")
+
+        if (should_compile) {
+            compile_with_daemon(files, classpath)
+        }
+
+        info("Compiled ${Paths.get(opts.cwd).relativize(src.toPath())} in " + java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start_time) + " ms")
     }
 
     fun run_test(args: Array<String>) {
-        if (opts.verbose) info("Testing ${opts.main_src}")
-        exec(
-            buildList {
-                add("java")
-                add("-Dfile.encoding=UTF-8")
-                add("-Dsun.stdout.encoding=UTF-8")
-                add("-Dsun.stderr.encoding=UTF-8")
-                if (opts.debug) add("-agentlib:jdwp=transport=dt_socket,server=y,suspend=y,address=5005")
-                add("-cp")
-                add(opts.test_classpath())
-                add(opts.main_class(opts.main_src.toFile()))
-                args.drop(2).forEach { add(it) }
-            },
-        )
+        info("Testing ${opts.main_src}")
+        val cmd = buildList{
+            add("java")
+            add("-Dfile.encoding=UTF-8")
+            add("-Dsun.stdout.encoding=UTF-8")
+            add("-Dsun.stderr.encoding=UTF-8")
+            if (opts.debug) add("-agentlib:jdwp=transport=dt_socket,server=y,suspend=y,address=5005")
+            add("-cp")
+            add(opts.test_classpath())
+            add(opts.main_class(opts.main_src.toFile()))
+            args.drop(2).forEach { add(it) }
+        }
+        exec(*cmd.toTypedArray())
     }
 
     fun run_target() {
-        if (opts.verbose) info("Running ${opts.main_src}")
-        exec(
-            buildList {
-                add("java")
-                add("-Dfile.encoding=UTF-8")
-                add("-Dsun.stdout.encoding=UTF-8")
-                add("-Dsun.stderr.encoding=UTF-8")
-                if (opts.debug) add("-agentlib:jdwp=transport=dt_socket,server=y,suspend=y,address=5005")
-                add("-cp")
-                add(opts.runtime_classpath())
-                add(opts.main_class(opts.main_src.toFile()))
-            },
-        )
+        info("Running ${Paths.get(opts.cwd).relativize(opts.main_src)}")
+        val cmd = buildList{
+            add("java")
+            add("-Dfile.encoding=UTF-8")
+            add("-Dsun.stdout.encoding=UTF-8")
+            add("-Dsun.stderr.encoding=UTF-8")
+            if (opts.debug) add("-agentlib:jdwp=transport=dt_socket,server=y,suspend=y,address=5005")
+            add("-cp")
+            add(opts.runtime_classpath())
+            add(opts.main_class(opts.main_src.toFile()))
+        }
+        exec(*cmd.toTypedArray())
     }
 
-    fun exec(cmd: List<String>) {
-        if (opts.verbose) info(cmd.joinToString(" "))
-        val builder = ProcessBuilder(cmd)
-        builder.inheritIO()
-        builder.directory(File(opts.cwd))
-        val process = builder.start()
-        exit_code = process.waitFor()
+    fun release_lib(jar_name: String) {
+        val start_time = System.nanoTime()
+        val lib_jar_file = opts.target_dir.resolve("$jar_name.jar").toFile()
+        exec("jar", "cf", lib_jar_file.absolutePath, "-C", opts.target_dir.toAbsolutePath().toString(), ".")
+        if (exit_code != 0) err("Failed to release $jar_name")
+        info("Released $jar_name in " + java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start_time) + " ms")
     }
 
-    private fun compile_with_daemon(files: List<File>) {
-        val compiler_id = CompilerId.makeCompilerId(Files.list(opts.kotlin_dir).filter { it.toString().endsWith(".jar") }.map { it.toFile() }.toList())
-        val client_alive_file = opts.target_dir.resolve(".alive").toFile().apply { if (!exists()) createNewFile() }
+    fun release_app(jar_name: String, main_class_fq: String) {
+        val startTime = System.nanoTime()
+        val fatJarFile = opts.target_dir.resolve("$jar_name.jar").toFile()
+        val addedEntries = mutableSetOf<String>()
 
-        val classpath = when (files.any { it.toPath() == opts.nob_src }){
-            true -> opts.nob_compile_classpath()
-            else -> opts.compile_classpath()
+        JarOutputStream(FileOutputStream(fatJarFile)).use { jar ->
+            val manifest = Manifest().apply {
+                mainAttributes.put(Attributes.Name.MANIFEST_VERSION, "1.0")
+                mainAttributes.put(Attributes.Name.MAIN_CLASS, main_class_fq)
+            }
+            JarOutputStream(FileOutputStream(fatJarFile), manifest).use { jarStream ->
+                fun addFile(file: File, baseDir: File) {
+                    val entryName = baseDir.toPath().relativize(file.toPath()).toString().replace("\\", "/")
+                    if (addedEntries.add(entryName)) {
+                        jarStream.putNextEntry(JarEntry(entryName))
+                        file.inputStream().use { it.copyTo(jarStream) }
+                        jarStream.closeEntry()
+                    }
+                }
+
+                opts.target_dir.toFile().walkTopDown()
+                    .filter { it.isFile && it.extension == "class" }
+                    .forEach { addFile(it, opts.target_dir.toFile()) }
+
+                opts.libs.forEach { lib ->
+                    if (lib.jar_file.exists()) {
+                        java.util.zip.ZipFile(lib.jar_file).use { zip ->
+                            zip.entries().asSequence().forEach { entry ->
+                                val name = entry.name
+                                if (name.startsWith("META-INF/")) return@forEach
+                                if (addedEntries.add(name)) {
+                                    jarStream.putNextEntry(JarEntry(name))
+                                    zip.getInputStream(entry).use { it.copyTo(jarStream) }
+                                    jarStream.closeEntry()
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
 
+        info("Released $jar_name in " + java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startTime) + " ms → ${fatJarFile.absolutePath}")
+    }
+
+    fun exec(vararg cmd: String) {
+        if (opts.verbose) info(cmd.joinToString(" "))
+        exit_code = java.lang.ProcessBuilder(*cmd)
+            .inheritIO()
+            .directory(File(opts.cwd))
+            .start()
+            .waitFor()
+    }
+
+    private fun compile_with_daemon(files: List<File>, classpath: String) {
         val args = buildList {
             add("-d")
             add(opts.target_dir.toString())
@@ -140,56 +210,50 @@ class Nob(private val opts: Opts) {
             files.forEach { add(it.absolutePath) }
         }
         if (opts.verbose) info("kotlinc ${args.joinToString(" ")}")
-
+        val client_alive_file = opts.target_dir.resolve(".alive").toFile().apply { if (!exists()) createNewFile() }
         val daemon_reports = arrayListOf<DaemonReportMessage>()
-
         val daemon = KotlinCompilerClient.connectToCompileService(
-            compilerId = compiler_id,
+            compilerId = CompilerId.makeCompilerId(Files.list(opts.kotlin_dir).filter { it.toString().endsWith(".jar") }.map { it.toFile() }.toList()),
             clientAliveFlagFile = client_alive_file,
             daemonJVMOptions = DaemonJVMOptions(),
             daemonOptions = DaemonOptions(verbose = opts.verbose),
             reportingTargets = DaemonReportingTargets(out = if (opts.verbose) System.out else null, messages = daemon_reports),
             autostart = true,
-        ) ?: error("unable to connect to compiler daemon: " + 
-            daemon_reports.joinToString("\n  ", prefix = "\n  ") { 
-                "${it.category.name} ${it.message}"
-            })
+        ) ?: error("unable to connect to compiler daemon: " + daemon_reports.joinToString("\n  ", prefix = "\n  ") { "${it.category.name} ${it.message}" })
 
         val session_id = daemon.leaseCompileSession(client_alive_file.absolutePath).get()
         try {
-            // val start_time = System.nanoTime()
             exit_code = KotlinCompilerClient.compile(
                 compilerService = daemon,
                 sessionId = session_id,
                 targetPlatform = CompileService.TargetPlatform.JVM,
                 args = args.toTypedArray(),
-                messageCollector = PrintingMessageCollector(System.err, MessageRenderer.PLAIN_FULL_PATHS, true),
+                messageCollector = org.jetbrains.kotlin.cli.common.messages.PrintingMessageCollector(System.err, org.jetbrains.kotlin.cli.common.messages.MessageRenderer.PLAIN_FULL_PATHS, true),
                 compilerMode = CompilerMode.NON_INCREMENTAL_COMPILER,
                 reportSeverity = ReportSeverity.INFO,
             )
-            // val end_time = System.nanoTime()
-            // info("Compiled ${files.map{it.name}} in " + TimeUnit.NANOSECONDS.toMillis(end_time - start_time) + " ms")
         } finally {
             daemon.releaseCompileSession(session_id) 
         }
     }
 
-    fun rebuild_urself(args: Array<String>) {
+    private fun rebuild_urself(args: Array<String>) {
         val nob_class_file = opts.main_class(opts.nob_src.toFile())
             .split(".")
             .fold(opts.target_dir) { acc, next -> acc.resolve(next) }
             .let { File(it.toFile().absolutePath + ".class").toPath() }
 
         if(Files.getLastModifiedTime(opts.nob_src).toInstant() > Files.getLastModifiedTime(nob_class_file).toInstant()) {
-            compile(opts.nob_src.toFile())
-
-            ProcessBuilder(
+            compile(
+                src = opts.nob_src.toFile(),
+                classpath = opts.nob_compile_classpath(),
+            )
+            exec(
                 "java",
                 "-cp", "out:${System.getProperty("java.class.path")}",
                 "nob.NobKt",
                 *args
-            ).inheritIO().start().waitFor()
-
+            )
             exit()
         } 
     }
@@ -200,44 +264,11 @@ class Nob(private val opts: Opts) {
         val package_path = pkg?.replace('.', File.separatorChar) ?: ""
         return opts.target_dir.resolve(package_path).resolve("$class_name.class").toFile()
     }
-
-    fun run_doc(args: Array<String>) {
-        val main = opts.main_srcs.first { it.toFile().name == "DocGen.kt" }
-        if (opts.verbose) info("Generating doc $main")
-        exec(
-            buildList {
-                add("java")
-                add("-Dfile.encoding=UTF-8")
-                add("-Dsun.stdout.encoding=UTF-8")
-                add("-Dsun.stderr.encoding=UTF-8")
-                if (opts.debug) add("-agentlib:jdwp=transport=dt_socket,server=y,suspend=y,address=5005")
-                add("-cp")
-                add(opts.test_classpath())
-                add(opts.main_class(main.toFile()))
-                args.drop(2).forEach { add(it) }
-            },
-        )
-    }
-}
-
-private fun parse_args(args: Array<String>): Opts {
-    var pos = 0
-    var opts = Opts(kotlin_dir = args.get(pos++).let(Paths::get))
-    while(true) {
-        when (val arg = args.getOrNull(pos++)) {
-            "debug" -> { opts.debug = true; opts.run = true }
-            "run" -> opts.run = true
-            "test" -> opts.test = true
-            "doc" -> opts.doc = true
-            null -> break
-        }
-    }
-    return opts
 }
 
 data class Opts(
     var cwd: String = System.getProperty("user.dir"),
-    var src_dir: Path = Paths.get(cwd, "src"),
+    var src_dirs: List<Path> = listOf(Paths.get(cwd, "src")),
     var test_dir: Path = Paths.get(cwd, "test"),
     var target_dir: Path = Paths.get(cwd, "out").also { it.toFile().mkdirs() },
     var kotlin_dir: Path = Paths.get(System.getProperty("KOTLIN_HOME"), "libexec", "lib"), // TODO: default not working
@@ -252,20 +283,14 @@ data class Opts(
     var debug: Boolean = false,
     var error: Boolean = true,
     var extra: Boolean = false,
-    var run: Boolean = false,
-    var test: Boolean = false,
-    var doc: Boolean = false,
 ) {
-    val main_src: Path get() = Files.walk(src_dir)
+    val main_srcs: List<Path> get() = src_dirs.asSequence()
+        .flatMap { Files.walk(it).asSequence() }
         .filter { it.toFile().isFile() }
         .filter { it.toFile().readText().contains("fun main(") }
         .toList()
-        .firstOrNull() ?: error("no main() found")
 
-    val main_srcs: List<Path> get() = Files.walk(src_dir)
-        .filter { it.toFile().isFile() }
-        .filter { it.toFile().readText().contains("fun main(") }
-        .toList()
+    val main_src: Path get() = main_srcs.firstOrNull() ?: error("no main() found")
 
     fun runtime_classpath(): String {
         val libs_paths = libs.filter { it.scope == "compile" || it.scope == "runtime" }
@@ -279,9 +304,9 @@ data class Opts(
             .joinToString(File.pathSeparator) { it.jar_path.toAbsolutePath().normalize().toString() }
         val target_dir_path = target_dir.toAbsolutePath().normalize().toString()
         val test_dir_path = test_dir.toAbsolutePath().normalize().toString()
-        val src_dir_path = src_dir.toAbsolutePath().normalize().toString()
+        val src_dirs_path = src_dirs.joinToString(File.pathSeparator) { it.toAbsolutePath().normalize().toString() }
         val res_dir_path = Paths.get(cwd, ".res").toAbsolutePath().normalize().toString()
-        return "$libs_paths:$target_dir_path:$test_dir_path:$src_dir_path:$res_dir_path"
+        return "$libs_paths:$target_dir_path:$test_dir_path:$src_dirs_path:$res_dir_path"
     }
 
     fun compile_classpath(): String {
@@ -302,7 +327,6 @@ data class Opts(
 
     fun main_class(src: File): String { 
         val pkg = src.useLines { lines -> lines.firstOrNull { it.trim().startsWith("package ") }?.removePrefix("package ")?.trim() }
-        // val main = src.toPath().fileName.toString().removeSuffix(".kt").lowercase().replaceFirstChar{ it.uppercase() } + "Kt"
         val main = src.toPath().fileName.toString().removeSuffix(".kt").replaceFirstChar{ it.uppercase() } + "Kt"
         return when (pkg) {
             null -> "$main"
@@ -351,7 +375,7 @@ data class Lib(
     }
 }
 
-private fun download_file(url: URI, file: File) {
+private fun download_file(url: java.net.URI, file: File) {
     if (file.exists()) {
         debug("download $url ${color("[CACHE]", Color.yellow)}")
         return
@@ -370,7 +394,7 @@ private fun download_file(url: URI, file: File) {
 
 private fun download_jar(lib: Lib) {
     if (lib.type != "jar") return
-    download_file(URI(lib.jar_url),lib.jar_file)
+    download_file(java.net.URI(lib.jar_url),lib.jar_file)
 }
 
 data class ResolvedLib(val lib: Lib, val resolved_from: String)
@@ -418,7 +442,7 @@ private fun solve_libs(opts: Opts, libs: List<Lib>): List<Lib> {
 
         save_cache(cache_file, resolved)
         val end_time = System.nanoTime()
-        info("Resolved ${resolved.size} libs in " + TimeUnit.NANOSECONDS.toMillis(end_time - start_time) + " ms")
+        info("Resolved ${resolved.size} libs in " + java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(end_time - start_time) + " ms")
     }
 
     return resolved.map { it.lib }.resolve_kotlin_libs(opts)
@@ -495,7 +519,7 @@ class GradleResolver {
                     val file_url = file_info["url"] as? String
                     if (file_name != null && file_url != null) {
                         download_file(
-                            url = URI(lib.module_url).resolve(file_url), 
+                            url = java.net.URI(lib.module_url).resolve(file_url), 
                             file = File("${jar_cache_dir}/${component_group}/${file_name}").also { it.parentFile.mkdirs() },
                         )
                     }
@@ -542,7 +566,7 @@ class GradleResolver {
                 lib.module_file.readText()
                     .also { debug("download ${lib.module_url} ${color("[CACHE]", Color.yellow)}") }
             } else {
-                URI(lib.module_url).toURL().openStream().bufferedReader().use { it.readText() }
+                java.net.URI(lib.module_url).toURL().openStream().bufferedReader().use { it.readText() }
                     .also { lib.module_file.writeText(it) }
                     .also { info("download ${lib.module_url} ${color("[OK]", Color.green)}") }
             }
@@ -598,8 +622,10 @@ class MavenResolver {
         return resolved
     }
 
-    private fun get_doc(lib: Lib): Document {
-        return pom_cache.getOrPut(lib) { download_pom(lib) ?: error("pom not found") }
+    private fun get_doc(lib: Lib): Document? {
+        val pom = pom_cache[lib] ?: download_pom(lib) 
+        if (pom != null) pom_cache[lib] = pom
+        return pom
     }
 
     private fun get_parent_lib(pom: Document): Lib? {
@@ -647,7 +673,12 @@ class MavenResolver {
         val value = props[prop_name]
         if (value != null) return value.takeIf { !it.matches(Regex("""\$\{(.+?)}""")) } ?: find_prop(value.substringAfter("\${").substringBefore("}"), pom)
         val parent_lib = get_parent_lib(pom)
-        return if (parent_lib != null) find_prop(prop_name, get_doc(parent_lib)) else null
+        if (parent_lib != null) {
+            get_doc(parent_lib)?.let { doc ->
+                return find_prop(prop_name, doc)
+            }
+        }
+        return null
     }
 
     private fun find_managed_version(key: LibKey, pom: Document): String? {
@@ -659,15 +690,19 @@ class MavenResolver {
         }
         val parent_lib = get_parent_lib(pom)
         if (parent_lib != null) {
-            val version = find_managed_version(key, get_doc(parent_lib))
-            if (version != null) return version
+            get_doc(parent_lib)?.let { doc ->
+                val version = find_managed_version(key, doc)
+                if (version != null) return version
+            }
         }
 
         val boms = get_boms(pom)
         for (bom_lib in boms) {
-            val bom_pom = get_doc(bom_lib)
-            val version = find_managed_version(key, bom_pom)
-            if (version != null) return version
+            get_doc(bom_lib)?.let { doc ->
+                find_managed_version(key, doc)?.let { version ->
+                    return version
+                }
+            }
         }
         return null
     }
@@ -697,13 +732,17 @@ class MavenResolver {
         if (managed_lib != null) return managed_lib.scope
         val parent_lib = get_parent_lib(pom)
         if (parent_lib != null) {
-            val scope = find_managed_scope(key, get_doc(parent_lib))
-            if (scope != "compile") return scope
+            get_doc(parent_lib)?.let { doc ->
+                val scope = find_managed_scope(key, doc)
+                if (scope != "compile") return scope
+            }
         } 
         val boms = get_boms(pom)
         for (bom_lib in boms) {
-            val scope = find_managed_scope(key, get_doc(bom_lib))
-            if (scope != "compile") return scope
+            get_doc(bom_lib)?.let { doc ->
+                val scope = find_managed_scope(key, doc)
+                if (scope != "compile") return scope
+            }
         }
         return "compile"
     }
@@ -749,7 +788,8 @@ class MavenResolver {
         .replace(Regex("&(?!amp;)(?!lt;)(?!gt;)(?!quot;)(?!apos;).+;"), "") // remove malformed tags
 
     private fun download_pom(lib: Lib): Document? {
-        fun document(text: String) = DocumentBuilderFactory.newInstance()
+        fun document(text: String) = javax.xml.parsers.DocumentBuilderFactory
+            .newInstance()
             .apply { 
                 setFeature("http://xml.org/sax/features/external-general-entities", false)
                 setFeature("http://xml.org/sax/features/external-parameter-entities", false)
@@ -766,7 +806,7 @@ class MavenResolver {
                 return document(lib.pom_file.readText().sanitize())
                     .also { debug("download ${lib.pom_url} ${color("[CACHE]", Color.yellow)}") }
             }
-            val text = URI(lib.pom_url).toURL().openStream().bufferedReader().use { it.readText() }.sanitize()
+            val text = java.net.URI(lib.pom_url).toURL().openStream().bufferedReader().use { it.readText() }.sanitize()
             lib.pom_file.writeText(text)
             return document(text)
                 .also { info("download ${lib.pom_url} ${color("[OK]", Color.green)}") }
