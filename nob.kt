@@ -187,7 +187,7 @@ class Nob(val opts: Opts) {
         exit_code = java.lang.ProcessBuilder(*cmd).inheritIO().directory(File(opts.cwd)).start().waitFor()
     }
 
-    private fun compile_with_daemon(src: File, classpath: String) {
+    private fun compile_with_daemon(src: File, classpath: String, retries: Int = 3) {
         val args = buildList {
             add("-d")
             add(opts.target_dir.toString())
@@ -216,19 +216,26 @@ class Nob(val opts: Opts) {
             reportingTargets = DaemonReportingTargets(out = if (opts.verbose) System.out else null, messages = daemon_reports),
             autostart = true,
         ) ?: error("unable to connect to compiler daemon: " + daemon_reports.joinToString("\n  ", prefix = "\n  ") { "${it.category.name} ${it.message}" })
-        val session_id = daemon.leaseCompileSession(client_alive_file.absolutePath).get()
         try {
-            exit_code = KotlinCompilerClient.compile(
-                compilerService = daemon,
-                sessionId = session_id,
-                targetPlatform = CompileService.TargetPlatform.JVM,
-                args = args.toTypedArray(),
-                messageCollector = org.jetbrains.kotlin.cli.common.messages.PrintingMessageCollector(System.err, org.jetbrains.kotlin.cli.common.messages.MessageRenderer.PLAIN_FULL_PATHS, true),
-                compilerMode = CompilerMode.NON_INCREMENTAL_COMPILER,
-                reportSeverity = ReportSeverity.INFO,
-            )
-        } finally {
-            daemon.releaseCompileSession(session_id) 
+            val session_id = daemon.leaseCompileSession(client_alive_file.absolutePath).get()
+            try {
+                exit_code = KotlinCompilerClient.compile(
+                    compilerService = daemon,
+                    sessionId = session_id,
+                    targetPlatform = CompileService.TargetPlatform.JVM,
+                    args = args.toTypedArray(),
+                    messageCollector = org.jetbrains.kotlin.cli.common.messages.PrintingMessageCollector(System.err, org.jetbrains.kotlin.cli.common.messages.MessageRenderer.PLAIN_FULL_PATHS, true),
+                    compilerMode = CompilerMode.NON_INCREMENTAL_COMPILER,
+                    reportSeverity = ReportSeverity.INFO,
+                )
+            } finally {
+                daemon.releaseCompileSession(session_id) 
+            }
+        } catch (e: IllegalStateException) {
+            daemon.shutdown()
+            if (retries > 0) compile_with_daemon(src, classpath, retries-1)
+            else throw e
+            return
         }
     }
 
