@@ -76,12 +76,12 @@ data class TestResult(
         false -> "".text(Color.RED) + "FAIL".bg(Color.RED).text(Color.GRAY) + "".text(Color.RED)
     }
 
-    private fun time(): String = "${time/1_000_000} ms".padEnd(9, ' ').text(Color.YELLOW)
-    private fun name(): String = "$name ".padEnd(40, '˒').text(Color.WHITE)
+    private fun time(): String = "${time/1_000_000} ms".padEnd(9, ' ').text(Color.DARK_YELLOW)
+    private fun name(): String = "$name ".text(Color.YELLOW)
 
     override fun toString(): String {
         return buildString {
-            append(" ${time()} ${name()} ${status()}")
+            append(" ${time()} ${status()} ${name()}")
             if (!success) {
                 if (msg != null) append("\n".padEnd(12, ' ') + msg.text(Color.LIGHT_GRAY))
                 if (loc != null) append("\n".padEnd(12, ' ') + loc.text(Color.LIGHT_GRAY))
@@ -154,7 +154,7 @@ object ClassLoader {
             }
             .filter { (_, clazz) -> clazz.hasTests() }
             .forEach { (classname, clazz) ->
-                println("".text(Color.GRAY) + classname.bg(Color.GRAY).text(Color.LIGHT_GRAY) + "".text(Color.GRAY))
+                println("".text(Color.DARK_YELLOW) + classname.bg(Color.DARK_YELLOW).text(Color.WHITE).padEnd(9, ' ') + "".text(Color.DARK_YELLOW))
                 runTests(classname)
             }
     }
@@ -179,15 +179,15 @@ object ClassLoader {
 
 data class Color(val r: Int, val b: Int, val g: Int) {
     companion object {
-        val BLUE = Color(69, 133, 136)
-        val YELLOW = Color(152, 151, 26)
-        val PURPLE = Color(177, 98, 134)
-        val WHITE = Color(222, 222, 222)
-        val GREEN = Color(0, 222, 155)
-        val DARK_YELLOW = Color(100, 100, 0)
-        val RED = Color(250, 100, 100)
-        val GRAY = Color(60, 60, 60)
-        val LIGHT_GRAY = Color(135, 125, 125)
+        val BLUE = Color(69, 133, 136)        // #458588
+        val YELLOW = Color(152, 151, 26)      // #98971a
+        val PURPLE = Color(177, 98, 134)      // #b16286
+        val WHITE = Color(222, 222, 222)      // #dedede
+        val GREEN = Color(95, 226, 108)       // #5fe26c
+        val DARK_YELLOW = Color(100, 100, 0)  // #646400
+        val RED = Color(250, 100, 100)        // #fa6464
+        val GRAY = Color(60, 60, 60)          // #3c3c3c
+        val LIGHT_GRAY = Color(135, 125, 125) // #877d7d
     }
 }
 
