@@ -14,7 +14,8 @@ mkdir -p out/nob
 
 if [ ! -f out/nob/NobKt.class ]; then
     echo "[INFO] bootstrapping nob.kt"
-    kotlinc nob.kt -cp "$LIBS" -d out
+    kotlinc nob.kt -cp "$LIBS" -d out -module-name nob
 fi
 
-java -cp "out:$LIBS" nob.NobKt "$KOTLIN_LIB" $@
+java -cp "out:$LIBS" nob.NobKt $@
+
