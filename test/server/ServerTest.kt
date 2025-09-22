@@ -50,10 +50,10 @@ class ServerTest {
             val secondText = StringSerde.deserialize(fetchText().body).expect("hello")
             val firstJson = fetchJson().body
             val secondJson = fetchJson().body
-            assertEq("hello", firstText)
-            assertEq("hello", secondText)
-            assertEq("{\"name\" : \"robin\"}", firstJson)
-            assertEq("{\"name\" : \"robin\"}", secondJson)
+            eq("hello", firstText)
+            eq("hello", secondText)
+            eq("{\"name\" : \"robin\"}", firstJson)
+            eq("{\"name\" : \"robin\"}", secondJson)
         } finally {
             server.stop(0)
         }

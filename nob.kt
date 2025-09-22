@@ -36,34 +36,21 @@ fun main(args: Array<String>) {
         mods = listOf(klib)
     }
     when {
-        // args.getOrNull(0) == "doc" -> nob.run_doc(klib, args.drop(1).toTypedArray())
+        args.getOrNull(0) == "doc" -> { 
+            nob.compile(klib)
+            nob.run(klib, "doc.DocGenKt", arrayOf("src/doc/DocGen.kt", "src/doc/KotlinParser.kt"))
+        }
         args.getOrNull(0) == "test" -> {
             nob.compile(test)
             nob.run(test, "test.TesterKt", arrayOf("-f", test.src_target().toAbsolutePath().normalize().toString()))
         }
-        args.getOrNull(0) == "klib" -> nob.compile(klib)
+        args.getOrNull(0) == "klib"     -> nob.compile(klib)
         args.getOrNull(0) == "examples" -> nob.compile(examples)
-        args.getOrNull(0) == "release" -> nob.release(klib)
+        args.getOrNull(0) == "release"  -> nob.release(klib)
         else -> nob.mods.filter { it.name != "nob" }.forEach { nob.compile(it) }
     }
     nob.exit()
 }
-
-// fun Nob.run_doc(module: Module, doc_args: Array<String>) {
-//     if (opts.verbose) info("Generating docs $doc_args")
-//     val cmd = buildList {
-//         add("java")
-//         add("-Dfile.encoding=UTF-8")
-//         add("-Dsun.stdout.encoding=UTF-8")
-//         add("-Dsun.stderr.encoding=UTF-8")
-//         if (opts.debug) add("-agentlib:jdwp=transport=dt_socket,server=y,suspend=y,address=5005")
-//         add("-cp")
-//         add(module.test_compile_cp())
-//         add("doc.DocGenKt")
-//         doc_args.forEach { add(it) }
-//     }
-//     exec(*cmd.toTypedArray())
-// }
 
 class Nob(val opts: Opts) {
     private var exit_code = 0
@@ -72,7 +59,7 @@ class Nob(val opts: Opts) {
 
     fun module(block: Module.() -> Unit): Module {
         val module = Module().apply(block)
-        module.libs = solve_libs(opts, module)
+        module.libs = resolve_libs(opts, module)
         mods.add(module)
         return module
     }
@@ -94,14 +81,13 @@ class Nob(val opts: Opts) {
         }
     }
 
-    // fun exit(): Unit = kotlin.system.exitProcess(exit_code)
     fun exit(code: Int = exit_code): Unit = System.exit(code)
 
     fun clean() {
         val target = path(mods.first().target)
         if (!Files.exists(target)) System.exit(0)
         Files.walk(target).forEach { f ->
-            if (f.fileName.toString() !in listOf(".alive", "libs.cache", mods.first().target)) {
+            if (f.fileName.toString() !in listOf(".alive", mods.first().target)) {
                 Files.walk(f).sorted(Comparator.reverseOrder()).forEach { Files.delete(it) }
             }
         }
@@ -123,10 +109,6 @@ class Nob(val opts: Opts) {
 
         val any_compiled_target_file = get_any_compiled_file(target.toFile())
         val has_changes = sources.any { file -> 
-            // println("src: $src")
-            // println("target: $target")
-            // println("file: $file")
-            // println("any_compiled_target_file: $any_compiled_target_file")
             file.lastModified() > any_compiled_target_file?.lastModified() ?: 0
         }
 
@@ -234,14 +216,19 @@ class Nob(val opts: Opts) {
 
     fun exec(vararg cmd: String) {
         if (opts.verbose) info(cmd.joinToString(" "))
-        info(cmd.joinToString(" "))
+        // info(cmd.joinToString(" "))
         exit_code = java.lang.ProcessBuilder(*cmd).inheritIO().start().waitFor()
     }
 
-    private val kotlin_home = Paths.get(System.getenv("KOTLIN_HOME"), "libexec", "lib")
-    private val kotlin_libs = listOf("kotlin-stdlib.jar", "kotlin-compiler.jar", "kotlin-daemon.jar", "kotlin-daemon-client.jar").joinToString(File.pathSeparator) { kotlin_home.resolve(it).toAbsolutePath().normalize().toString() }
-
     private fun compile_with_daemon(src: File, target: Path, classpath: String, name: String, retries: Int = 3) {
+        val kotlin_libs = listOf(
+            "kotlin-stdlib.jar",
+            "kotlin-compiler.jar",
+            "kotlin-daemon.jar",
+            "kotlin-daemon-client.jar",
+        ).joinToString(File.pathSeparator) { 
+            opts.kotlin_home.resolve(it).toAbsolutePath().normalize().toString() 
+        }
         val args = buildList {
             add("-d")
             add(target.toString())
@@ -265,7 +252,7 @@ class Nob(val opts: Opts) {
         // info("kotlinc ${args.joinToString(" ")}")
         val client_alive_file = target.resolve(".alive").toFile().apply { if (!exists()) createNewFile() }
         val daemon_reports = arrayListOf<DaemonReportMessage>()
-        val compiler_id = Files.list(kotlin_home).filter { it.toString().endsWith(".jar") }.map { it.toFile() }.toList()
+        val compiler_id = Files.list(opts.kotlin_home).filter { it.toString().endsWith(".jar") }.map { it.toFile() }.toList()
         val daemon = KotlinCompilerClient.connectToCompileService(
             compilerId = CompilerId.makeCompilerId(compiler_id),
             clientAliveFlagFile = client_alive_file,
@@ -322,6 +309,7 @@ class Nob(val opts: Opts) {
 data class Opts(
     var jvm_version: Int = 21,
     var kotlin_version: String = "2.2.0",
+    var kotlin_home: Path = Paths.get(System.getenv("KOTLIN_HOME"), "libexec", "lib"),
     var backend_threads: Int = 0, // run codegen with N thread per processor (Default 1)
     var verbose: Boolean = false,
     var error: Boolean = true,
@@ -355,7 +343,7 @@ data class Module(
         return when {
             src_target.isFile -> path("$target/$name")
             src_target.isDirectory -> path("$target/$src")
-            else -> error("file is not file or directory $src_target")
+            else -> error("'$src_target' is not a file nor a directory. Exists: ${src_target.exists()}")
         }
     }
 
@@ -369,9 +357,9 @@ data class Module(
     fun runtime_cp(): String {
         val libs = libs.filter { it.scope in listOf("runtime", "compile") }.map { it.jar_path }.into_cp() 
         val mods = mods.map { it.src_target().toAbsolutePath().normalize().toString() }.joinToString(File.pathSeparator)
+        val res = path(res).toAbsolutePath().normalize().toString()
         val target = path(target).toAbsolutePath().normalize().toString() 
         val src_target = src_target().toAbsolutePath().normalize().toString()
-        val res = path(res).toAbsolutePath().normalize().toString()
         return listOf(libs, mods, res, target, src_target).filter { it.isNotBlank() }.joinToString(File.pathSeparator)
     }
 
@@ -397,6 +385,7 @@ data class Lib(
     val jar_file get() = File("${jar_cache_dir}/${group_id}/${artifact_id}-${version}.jar").also { it.parentFile.mkdirs() }
     val pom_file get() = File("${jar_cache_dir}/${group_id}/${artifact_id}-${version}.pom").also { it.parentFile.mkdirs() }
     val module_file get() = File("${jar_cache_dir}/${group_id}/${artifact_id}-${version}.module").also { it.parentFile.mkdirs() }
+    val is_local get() = repo == "local"
     override fun toString() = "$group_id:$artifact_id:$version"
     override fun hashCode(): Int = "${toString()}:$scope".hashCode()
     override fun equals(other: Any?): Boolean {
@@ -406,6 +395,7 @@ data class Lib(
     }
     companion object {
         fun of(str: String) = str.split(':').let { Lib(it[0], it[1], it[2], it.getOrElse(3) { "compile" }) } 
+        fun local(str: String) = Lib("", str, "", repo = "local", jar_path = Paths.get(System.getProperty("user.dir"), str))
     }
 }
 
@@ -434,7 +424,7 @@ private fun download_jar(lib: Lib) {
 data class ResolvedLib(val lib: Lib, val resolved_from: String)
 data class LibKey(val group: String, val artifact: String)
 
-private fun solve_libs(opts: Opts, module: Module): List<Lib> {
+private fun resolve_libs(opts: Opts, module: Module): List<Lib> {
     val start_time = System.nanoTime()
     val cache_file = path(module.target).resolve("libs.cache").toFile()
     val resolved = mutableListOf<ResolvedLib>()
@@ -450,8 +440,10 @@ private fun solve_libs(opts: Opts, module: Module): List<Lib> {
             if (key !in keys) {
                 resolved.add(ResolvedLib(lib, "local"))
                 keys.add(key)
-                queue.add(lib)
-                download_jar(lib)
+                if (lib.repo != "local") {
+                    queue.add(lib)
+                    download_jar(lib)
+                }
             }
         }
         while(queue.isNotEmpty()) {
@@ -469,6 +461,7 @@ private fun solve_libs(opts: Opts, module: Module): List<Lib> {
                     }
                 }
         }
+        info("resolve_kotlin_libs")
         return resolved.resolve_kotlin_libs(opts).also {
             save_cache(cache_file, it)
             info("Resolved ${resolved.size} libs ${stop(start_time)}")
@@ -478,27 +471,24 @@ private fun solve_libs(opts: Opts, module: Module): List<Lib> {
 }
 
 private fun List<ResolvedLib>.resolve_kotlin_libs(opts: Opts): List<ResolvedLib> {
-    val kotlin_home = Paths.get(System.getenv("KOTLIN_HOME"), "libexec", "lib")
-    return this
-        // .filterNot { it.group_id == "org.jetbrains.kotlin" && it.artifact_id == "kotlin-stdlib-common" }
-        .map { resolved -> 
-            val lib = resolved.lib
-            when (lib.group_id) {
-                "org.jetbrains.kotlin" -> {
-                    val local = kotlin_home.resolve("${lib.artifact_id}.jar")
-                    when (local.toFile().exists()) {
-                        true -> {
-                            info("found local kotlin substitute: $local")
-                            ResolvedLib(lib.copy(version = opts.kotlin_version, jar_path = local), resolved.resolved_from)
-                        }
-                        false -> {
-                            info("found no kotlin subsistute, fallback to $resolved")
-                            resolved
-                        }
+    return this.map { resolved -> 
+        val lib = resolved.lib
+        when (lib.group_id) {
+            "org.jetbrains.kotlin" -> {
+                val local = opts.kotlin_home.resolve("${lib.artifact_id}.jar")
+                when (local.toFile().exists()) {
+                    true -> {
+                        info("found local kotlin substitute: $local")
+                        ResolvedLib(lib.copy(version = opts.kotlin_version, jar_path = local, repo = "local"), resolved.resolved_from)
+                    }
+                    false -> {
+                        info("found no kotlin subsistute, fallback to $resolved")
+                        resolved
                     }
                 }
-                else -> resolved
             }
+            else -> resolved
+        }
     }
 }
 
@@ -507,22 +497,36 @@ private fun read_cache(file: File, resolved: MutableList<ResolvedLib>) {
     file.readLines()
         .mapNotNull { line -> 
             val parts = line.split(":")
-            if (parts.size != 6) null
-            // restore jar_path for local libs
-            when (val jar_path = parts.getOrNull(6)) {
-                null -> ResolvedLib(resolved_from = parts[5], lib = Lib(parts[0], parts[1], parts[2], parts[3], parts[4]))
-                else -> ResolvedLib(resolved_from = parts[5], lib = Lib(parts[0], parts[1], parts[2], parts[3], parts[4], jar_path = Paths.get(jar_path)))
+            val repo = parts.getOrNull(6)
+            val jar_path = parts.getOrNull(7)?.let(Paths::get)
+            val lib = if (repo != null && jar_path !=  null) {
+                Lib(
+                    group_id = parts[0],
+                    artifact_id = parts[1],
+                    version = parts[2],
+                    scope = parts[3],
+                    type = parts[4],
+                    repo = repo,
+                    jar_path = jar_path,
+                )
+            } else {
+                Lib(
+                    group_id = parts[0],
+                    artifact_id = parts[1],
+                    version = parts[2],
+                    scope = parts[3],
+                    type = parts[4]
+                )
             }
+            ResolvedLib(lib = lib, resolved_from = parts[5])
         }.forEach(resolved::add)
 }
 
 private fun save_cache(file: File, resolved: List<ResolvedLib>) {
     file.writeText(resolved.joinToString("\n") {
-        // save jar_path for local libs
-        if (it.lib.jar_path.parent.parent.fileName.toString() != ".nob_cache") {
-            "${it.lib}:${it.lib.scope}:${it.lib.type}:${it.resolved_from}:${it.lib.jar_path.toAbsolutePath().normalize().toString()}"
-        } else {
-            "${it.lib}:${it.lib.scope}:${it.lib.type}:${it.resolved_from}"
+        when (it.lib.is_local) {
+            true  -> "${it.lib}:${it.lib.scope}:${it.lib.type}:${it.resolved_from}:${it.lib.repo}:${it.lib.jar_path.toAbsolutePath().normalize().toString()}" 
+            false -> "${it.lib}:${it.lib.scope}:${it.lib.type}:${it.resolved_from}"
         }
     })
 }

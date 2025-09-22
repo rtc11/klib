@@ -6,7 +6,7 @@ class NoPkgTest {
 
     @Test
     fun `can test classes without package`() {
-        assertEq(left, right)
+        eq(left, right)
     }
 
     @Before

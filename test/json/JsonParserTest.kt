@@ -23,7 +23,7 @@ class JsonParserTest {
             kids = listOf("AB", "CD")
         )
 
-        assertEq(expected, person)
+        eq(expected, person)
     }
 
     @Test
@@ -36,7 +36,7 @@ class JsonParserTest {
         )
         val json = JsonSerde.serialize(person.into()).unwrap()
         fun String.removeWhitespaces(): String = replace("\n", "").replace(" ", "")
-        assertEq(json.removeWhitespaces(), json.removeWhitespaces())
+        eq(json.removeWhitespaces(), json.removeWhitespaces())
     }
 
     @Test

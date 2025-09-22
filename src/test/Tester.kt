@@ -35,14 +35,6 @@ fun main(args: Array<String>) {
             System.exit(1)
         }
         ClassLoader.runAllTests(test_dir)
-        // val className = path.split("/")
-        //     .dropWhile { it != "test" }.drop(1)
-        //     .joinToString(".")
-        //     .removeSuffix(".kt")
-        //
-        //     if(!ClassLoader.runTests(className)) {
-        //         System.exit(1)
-        //     }
     }
 
     cmds.getFlagValue("-p")?.let { path ->
@@ -76,21 +68,32 @@ data class TestResult(
     private val time: Long,
     private val msg: String? = null,
     private val loc: String? = null,
+    private val err: AssertionError? = null,
 ) {
     private fun status(): String = when (success) {
         true -> "".text(Color.GREEN) + "PASS".bg(Color.GREEN).text(Color.GRAY) + "".text(Color.GREEN)
         false -> "".text(Color.RED) + "FAIL".bg(Color.RED).text(Color.GRAY) + "".text(Color.RED)
     }
 
-    private fun time(): String = "${time/1_000_000} ms".padEnd(9, ' ').text(Color.DARK_YELLOW)
     private fun name(): String = "$name ".text(Color.YELLOW)
+    private fun time(): String  {
+        return when(time) {
+            in 0 .. 999 -> "$time ns".padEnd(9, ' ').text(Color.DARK_YELLOW)
+            in 1000 .. 999_999 -> "${time/1_000} µs".padEnd(9, ' ').text(Color.DARK_YELLOW)
+            else -> "${time/1_000_000} ms".padEnd(9, ' ').text(Color.DARK_YELLOW)
+        }
+    }
 
     override fun toString(): String {
         return buildString {
             append(" ${time()} ${status()} ${name()}")
             if (!success) {
-                if (msg != null) append("\n".padEnd(12, ' ') + msg.text(Color.LIGHT_GRAY))
                 if (loc != null) append("\n".padEnd(12, ' ') + loc.text(Color.LIGHT_GRAY))
+                if (msg != null && err?.left == null && err?.right == null) append("\n".padEnd(12, ' ') + msg.text(Color.LIGHT_GRAY))
+                if (err?.left != null || err?.right != null) {
+                    append("\n".padEnd(12, ' ') + "left:  " + err.left.toString().text(Color.LIGHT_GRAY))
+                    append("\n".padEnd(12, ' ') + "right: " + err.right.toString().text(Color.LIGHT_GRAY))
+                }
             }
         }
     }
@@ -142,16 +145,8 @@ object ClassLoader {
             .mapNotNull { file ->
                 val relative_path = file.toRelativeString(root_dir)
                 val class_name = relative_path 
-                    // .removePrefix("test" + File.separator)
                     .replace(File.separator, ".")
                     .removeSuffix(".class")
-                    // val class_name = file.canonicalPath
-                    //     .removePrefix(root_dir.canonicalPath)
-                    //     .removePrefix(File.separator)
-                    //     .removePrefix(root_dir.canonicalPath)
-                    //     .removePrefix(File.separator)
-                    //     .replace(File.separator, ".")
-                    //     .removeSuffix(".class")
                 try {
                     when (class_name.isBlank()) {
                         true -> null
@@ -182,9 +177,9 @@ object ClassLoader {
             if (cause is AssertionError) {
                 val trace = cause.stackTrace.firstOrNull { !it.className.startsWith("test.AssertionsKt") && !it.className.startsWith("test.ClassLoader") }
                 val loc = trace?.let { "${it.fileName}:${it.lineNumber}" }
-                Result.Ok(TestResult(method.name, false, start.stop(), cause.message, loc))
+                Result.Ok(TestResult(method.name, false, start.stop(), cause.message, loc, cause))
             } else {
-                Result.Err(e)
+                Result.Err(cause ?: e)
             }
         }
     }

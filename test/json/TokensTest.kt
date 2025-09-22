@@ -10,19 +10,14 @@ class TokensTest {
     fun `can parse true`() {
         val parsed = bool.parseToEnd("true").unwrap()
         assertIs<ParseResult<Boolean>>(parsed)
-        assertEq(true, parsed.result)
+        eq(true, parsed.result)
     }
-
-    // @Test
-    // fun `this should fail`() {
-    //     assertEq(true, false)
-    // }
 
     @Test
     fun `can parse false`() {
         val parsed = bool.parseToEnd("false").unwrap()
         assertIs<ParseResult<Boolean>>(parsed)
-        assertEq(false, parsed.result)
+        eq(false, parsed.result)
     }
 
     @Test

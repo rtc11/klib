@@ -9,14 +9,14 @@ class CommandsTest {
     fun `parse no args`() {
         val cli = Commands(arrayOf())
         val cmds = cli.parse()
-        assertEq(cmds.size, 0)
+        eq(cmds.size, 0)
     }
 
     @Test
     fun `parse double dashed flags`() {
         val cli = Commands(arrayOf("--version"))
         val cmds = cli.parse()
-        assertEq(cmds.size, 1)
+        eq(cmds.size, 1)
         val cmd = cmds.single()
         assertIs<Cmd.Flag>(cmd)
         assert<Cmd.Flag>(cmd) { it.flag == "--version" }
@@ -26,7 +26,7 @@ class CommandsTest {
     fun `parse double dashed flag with value`() {
         val cli = Commands(arrayOf("--version", "1"))
         val cmds = cli.parse()
-        assertEq(cmds.size, 1)
+        eq(cmds.size, 1)
         val cmd = cmds.single()
         assertIs<Cmd.FlagWithValue>(cmd)
         assert<Cmd.FlagWithValue>(cmd) { it.flag == "--version" }
@@ -37,7 +37,7 @@ class CommandsTest {
     fun `parse one flag`() {
         val cli = Commands(arrayOf("-v"))
         val cmds = cli.parse()
-        assertEq(cmds.size, 1)
+        eq(cmds.size, 1)
         val cmd = cmds.single()
         assertIs<Cmd.Flag>(cmd)
         assert<Cmd.Flag>(cmd) { it.flag == "-v" }
@@ -47,7 +47,7 @@ class CommandsTest {
     fun `parse multiple flags`() {
         val cli = Commands(arrayOf("-a", "-b", "-c"))
         val cmds = cli.parse()
-        assertEq(cmds.size, 3)
+        eq(cmds.size, 3)
         val a = cmds[0]
         val b = cmds[1]
         val c = cmds[2]
@@ -63,7 +63,7 @@ class CommandsTest {
     fun `parse flag with value`() {
         val cli = Commands(arrayOf("-c", "class"))
         val cmds = cli.parse()
-        assertEq(cmds.size, 1)
+        eq(cmds.size, 1)
         val cmd = cmds.single()
         assertIs<Cmd.FlagWithValue>(cmd)
         assert<Cmd.FlagWithValue>(cmd) { it.flag == "-c"}
@@ -74,7 +74,7 @@ class CommandsTest {
     fun `parse multiple flags with value`() {
         val cli = Commands(arrayOf("-c", "class", "-t", "test"))
         val cmds = cli.parse()
-        assertEq(cmds.size, 2)
+        eq(cmds.size, 2)
         val c = cmds[0]
         val t = cmds[1]
         assertIs<Cmd.FlagWithValue>(c)
@@ -89,7 +89,7 @@ class CommandsTest {
     fun `accumulates subsequent flag values`() {
         val cli = Commands(arrayOf("-c", "class", "name", "test"))
         val cmds = cli.parse()
-        assertEq(cmds.size, 1)
+        eq(cmds.size, 1)
         val c = cmds[0]
         assertIs<Cmd.FlagWithValue>(c)
         assert<Cmd.FlagWithValue>(c) { it.flag == "-c"}

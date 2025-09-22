@@ -1,12 +1,20 @@
 package test
 
-class AssertionError(message: String) : Exception(message)
+class AssertionError(
+    message: String,
+    val left: Any? = null,
+    val right: Any? = null,
+) : Exception(message)
 
-fun eq(left: Any, right: Any) = assertEq(left, right)
-
-fun assertEq(left: Any, right: Any) {
+fun eq(left: Any?, right: Any?) {
     if (left != right) {
-        throw AssertionError("$left != $right")
+        throw AssertionError("should be equal", left, right)
+    }
+}
+
+fun neq(left: Any?, right: Any?) {
+    if (left == right) {
+        throw AssertionError("should not be equal", left, right)
     }
 }
 
@@ -20,7 +28,6 @@ fun fail(msg: String = "Assertion failed") {
     throw AssertionError(msg)
 }
 
-// todo: this only fails with "assertion failed". Make it fail with a message that includes the expected and actual values
 inline fun <reified T: Any> assert(it: Any, predicate: (T) -> Boolean) {
     assert(predicate(it as T))
 }
