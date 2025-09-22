@@ -160,28 +160,17 @@ class Nob(val opts: Opts) {
 
     fun release(module: Module) {
         val start_time = System.nanoTime()
-        val main_class_fq = module.main_src()?.main_class_fq()
-        // val compiled_dir = main_class_fq?.substringBeforeLast('.')?.replace('.', File.separatorChar) ?: module.src.substringBeforeLast(File.separator)
-
         val src_target = Paths.get(module.src).toFile()
         val compiled_dir = when {
             src_target.isFile -> module.target
             src_target.isDirectory -> Paths.get(module.target, module.src).toString()
             else -> error("file is not file or directory $src_target")
         }
-        if (main_class_fq == null) {
-            val meta_inf = "META-INF/${module.name}.kotlin_module"
-            exec(
-                "jar", "cf", "${module.target}/${module.name}.jar",
-                // "-C", compiled_dir, meta_inf,
-                "-C", compiled_dir, "."
-            )
-        } else {
-            exec(
-                "jar", "cfe", "${module.target}/${module.name}.jar",
-                main_class_fq,
-                "-C", module.target, compiled_dir
-            )
+
+        val meta_inf = "META-INF/${module.name}.kotlin_module"
+        when (val main_class_fq = module.main_src()?.main_class_fq()) {
+            null -> exec("jar", "cf", "${module.target}/${module.name}.jar", "-C", compiled_dir, ".")
+            else -> exec("jar", "cfe", "${module.target}/${module.name}.jar", main_class_fq, "-C", compiled_dir, ".")
         }
         if (exit_code != 0) err("Failed to release ${module.name}.jar")
         info("Released ${module.name}.jar ${stop(start_time)}")
