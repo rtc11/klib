@@ -2,7 +2,6 @@ package util
 
 import test.*
 import util.*
-import util.*
 
 class CommandsTest {
 

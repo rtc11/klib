@@ -29,14 +29,20 @@ fun main(args: Array<String>) {
     } 
 
     cmds.getFlagValue("-f")?.let { path ->
-        val className = path.split("/")
-            .dropWhile { it != "test" }.drop(1)
-            .joinToString(".")
-            .removeSuffix(".kt")
-
-            if(!ClassLoader.runTests(className)) {
-                System.exit(1)
-            }
+        val test_dir = File(path)
+        if (!test_dir.exists() || !test_dir.isDirectory) {
+            println("[ERR] Path '$path' not found or is not a directory.")
+            System.exit(1)
+        }
+        ClassLoader.runAllTests(test_dir)
+        // val className = path.split("/")
+        //     .dropWhile { it != "test" }.drop(1)
+        //     .joinToString(".")
+        //     .removeSuffix(".kt")
+        //
+        //     if(!ClassLoader.runTests(className)) {
+        //         System.exit(1)
+        //     }
     }
 
     cmds.getFlagValue("-p")?.let { path ->
@@ -134,18 +140,25 @@ object ClassLoader {
             .filter { it.extension == "class" }
             .filterNot { it.name.contains('$') }
             .mapNotNull { file ->
+                val relative_path = file.toRelativeString(root_dir)
+                val class_name = relative_path 
+                    // .removePrefix("test" + File.separator)
+                    .replace(File.separator, ".")
+                    .removeSuffix(".class")
+                    // val class_name = file.canonicalPath
+                    //     .removePrefix(root_dir.canonicalPath)
+                    //     .removePrefix(File.separator)
+                    //     .removePrefix(root_dir.canonicalPath)
+                    //     .removePrefix(File.separator)
+                    //     .replace(File.separator, ".")
+                    //     .removeSuffix(".class")
                 try {
-                    val class_name = file.canonicalPath
-                        .removePrefix(root_dir.canonicalPath)
-                        .removePrefix(File.separator)
-                        .replace(File.separator, ".")
-                        .removeSuffix(".class")
                     when (class_name.isBlank()) {
                         true -> null
                         false -> class_name to Class.forName(class_name)
                     }
                 } catch (e: ClassNotFoundException) {
-                    println("[WARN] Class not found for file ${file.absolutePath}")
+                    println("[WARN] Class $class_name not found for file ${file.absolutePath}")
                     null
                 } catch (e: Exception) {
                     println("[ERR] Failed to process file ${file.absolutePath}: ${e.message}")

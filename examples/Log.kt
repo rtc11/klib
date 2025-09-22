@@ -1,5 +1,3 @@
-package examples
-
 import util.*
 
 fun main() {

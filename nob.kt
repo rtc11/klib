@@ -17,57 +17,62 @@ fun main(args: Array<String>) {
     val klib = nob.module {
         name = "klib"
         res = ".res"
-        compile_dir = ""
         libs = listOf(
             Lib.of("org.jetbrains.kotlinx:kotlinx-coroutines-core-jvm:1.10.2"),
         )
+    }
+
+    val test = nob.module {
+        name = "test"
+        res = ".res"
+        src = "test"
+        mods = listOf(klib)
     }
 
     val examples = nob.module {
         name = "examples"
         src = "examples"
         res = ".res"
-        compile_dir = "examples"
-        modules = listOf(klib)
+        mods = listOf(klib)
     }
     when {
-        nob.opts.debug -> nob.run(args)
-        args.getOrNull(0) == "run" -> nob.run(args)
-        args.getOrNull(0) == "doc" -> nob.run_doc(klib, args.drop(1).toTypedArray())
+        // args.getOrNull(0) == "doc" -> nob.run_doc(klib, args.drop(1).toTypedArray())
         args.getOrNull(0) == "test" -> {
-            nob.compile(klib, test = true)
-            nob.test(klib, "test.TesterKt", arrayOf())
+            nob.compile(test)
+            nob.run(test, "test.TesterKt", arrayOf("-f", test.src_target().toAbsolutePath().normalize().toString()))
         }
-        else -> nob.compile(args)
+        args.getOrNull(0) == "klib" -> nob.compile(klib)
+        args.getOrNull(0) == "examples" -> nob.compile(examples)
+        else -> nob.mods.filter { it.name != "nob" }.forEach { nob.compile(it) }
     }
     nob.exit()
 }
 
-fun Nob.run_doc(module: Module, doc_args: Array<String>) {
-    if (opts.verbose) info("Generating docs $doc_args")
-    val cmd = buildList {
-        add("java")
-        add("-Dfile.encoding=UTF-8")
-        add("-Dsun.stdout.encoding=UTF-8")
-        add("-Dsun.stderr.encoding=UTF-8")
-        if (opts.debug) add("-agentlib:jdwp=transport=dt_socket,server=y,suspend=y,address=5005")
-        add("-cp")
-        add(module.test_compile_cp())
-        add("doc.DocGenKt")
-        doc_args.forEach { add(it) }
-    }
-    exec(*cmd.toTypedArray())
-}
+// fun Nob.run_doc(module: Module, doc_args: Array<String>) {
+//     if (opts.verbose) info("Generating docs $doc_args")
+//     val cmd = buildList {
+//         add("java")
+//         add("-Dfile.encoding=UTF-8")
+//         add("-Dsun.stdout.encoding=UTF-8")
+//         add("-Dsun.stderr.encoding=UTF-8")
+//         if (opts.debug) add("-agentlib:jdwp=transport=dt_socket,server=y,suspend=y,address=5005")
+//         add("-cp")
+//         add(module.test_compile_cp())
+//         add("doc.DocGenKt")
+//         doc_args.forEach { add(it) }
+//     }
+//     exec(*cmd.toTypedArray())
+// }
 
 class Nob(val opts: Opts) {
     private var exit_code = 0
-    var modules = mutableListOf<Module>()
+    var mods = mutableListOf<Module>()
     var compiled = mutableSetOf<Module>()
 
     fun module(block: Module.() -> Unit): Module {
         val module = Module().apply(block)
         module.libs = solve_libs(opts, module)
-        modules.add(module)
+        mods.add(module)
         return module
     }
 
@@ -88,71 +93,55 @@ class Nob(val opts: Opts) {
         }
     }
 
-    fun exit() = System.exit(exit_code)
+    // fun exit(): Unit = kotlin.system.exitProcess(exit_code)
+    fun exit(code: Int = exit_code): Unit = System.exit(code)
 
     fun clean() {
-        val target = path(modules.first().target)
+        val target = path(mods.first().target)
         if (!Files.exists(target)) System.exit(0)
         Files.walk(target).forEach { f ->
-            if (f.fileName.toString() !in listOf(".alive", "libs.cache", modules.first().target)) {
+            if (f.fileName.toString() !in listOf(".alive", "libs.cache", mods.first().target)) {
                 Files.walk(f).sorted(Comparator.reverseOrder()).forEach { Files.delete(it) }
             }
         }
-        System.exit(0)
+        exit(0)
     }
 
-    fun compile(args: Array<String>) {
-        var module = modules.filter { it.name in args }.firstOrNull() 
-            ?: modules.firstOrNull { it.name != "nob" } 
-            ?: error("no module found")
-        compile(module)
-    }
-
-    fun compile(module: Module, test: Boolean = false) {
+    fun compile(module: Module) {
         val start_time = System.nanoTime()
         if (module in compiled) return
-        module.modules.forEach { compile(it) }
-        val src = if (test) path(module.test).toFile() else path(module.src).toFile()
+        module.mods.forEach { compile(it) }
+
+        val src = path(module.src).toFile()
+        var target = module.src_target()
         val sources: Sequence<File> = when {
             src.isFile -> sequenceOf(src)
             src.isDirectory -> src.walkTopDown().filter { it.isFile && it.extension == "kt" }
             else -> emptySequence()
         }
-        val compile_dir = path("${module.target}/${module.compile_dir()}").toFile()
-        val any_compiled_target_file = get_any_compiled_file(compile_dir, test)
-        val has_changes = sources.any { file -> file.lastModified() > any_compiled_target_file?.lastModified() ?: 0 }
+
+        val any_compiled_target_file = get_any_compiled_file(target.toFile())
+        val has_changes = sources.any { file -> 
+            // println("src: $src")
+            // println("target: $target")
+            // println("file: $file")
+            // println("any_compiled_target_file: $any_compiled_target_file")
+            file.lastModified() > any_compiled_target_file?.lastModified() ?: 0
+        }
+
         compiled.add(module)
+
         if (has_changes) {
-            val classpath = if (test) module.test_compile_cp() else module.compile_cp()
-            compile_with_daemon(src, path(module.target), classpath, module.name)
-            info("Compiled ${Paths.get(System.getProperty("user.dir")).relativize(src.toPath())} ${stop(start_time)}")
+            val classpath = module.compile_cp()
+            if (src.isFile && src.name == "nob.kt") target = Paths.get(module.target).toAbsolutePath().normalize() 
+            compile_with_daemon(src, target, classpath, module.name)
+            info("Compiled ${module.name} ${stop(start_time)}")
         } else {
-            info("${Paths.get(System.getProperty("user.dir")).relativize(src.toPath())} is up to date ${stop(start_time)}")
+            info("${module.name} is up to date ${stop(start_time)}")
         }
     }
 
-    fun test(module: Module, runner: String, runner_args: Array<String>) {
-        val start_time = System.nanoTime()
-        val cmd = buildList{
-            add("java")
-            add("-Dfile.encoding=UTF-8")
-            add("-Dsun.stdout.encoding=UTF-8")
-            add("-Dsun.stderr.encoding=UTF-8")
-            if (opts.debug) add("-agentlib:jdwp=transport=dt_socket,server=y,suspend=y,address=5005")
-            add("-cp")
-            add(module.test_compile_cp())
-            add(runner)
-            runner_args.forEach { add(it) }
-        }
-        exec(quiet = false, *cmd.toTypedArray())
-        info("Tests completed ${stop(start_time)}")
-    }
-
-    // run <module> <optional Main.kt>
-    fun run(args: Array<String>) {
-        var module = modules.filter { it.src in args }.firstOrNull() ?: modules.filter { it.src != "nob.kt" }.first() 
-        val main_class_fq = module.main_srcs().singleOrNull { it.fileName.toString() in args }?.main_class_fq()
-            ?: module.main_srcs().first().main_class_fq()
+    fun run(module: Module, main_class_fq: String, run_args: Array<String>) {
         info("Running $main_class_fq")
         val cmd = buildList{
             add("java")
@@ -163,6 +152,7 @@ class Nob(val opts: Opts) {
             add("-cp")
             add(module.runtime_cp())
             add(main_class_fq)
+            run_args.forEach { add(it) }
         }
         exec(*cmd.toTypedArray())
     }
@@ -246,6 +236,7 @@ class Nob(val opts: Opts) {
 
     fun exec(vararg cmd: String) {
         if (opts.verbose) info(cmd.joinToString(" "))
+        // info(cmd.joinToString(" "))
         exit_code = java.lang.ProcessBuilder(*cmd).inheritIO().start().waitFor()
     }
 
@@ -273,6 +264,7 @@ class Nob(val opts: Opts) {
             add(src.absolutePath)
         }
         if (opts.verbose) info("kotlinc ${args.joinToString(" ")}")
+        // info("kotlinc ${args.joinToString(" ")}")
         val client_alive_file = target.resolve(".alive").toFile().apply { if (!exists()) createNewFile() }
         val daemon_reports = arrayListOf<DaemonReportMessage>()
         val compiler_id = Files.list(kotlin_home).filter { it.toString().endsWith(".jar") }.map { it.toFile() }.toList()
@@ -309,22 +301,21 @@ class Nob(val opts: Opts) {
     }
 
     private fun rebuild_urself(module: Module, args: Array<String>) {
-        val nob_src = path(module.src)
-        val nob_class_file = nob_src.main_class_fq()
-            .split(".")
-            .fold(path(module.target)) { acc, next -> acc.resolve(next) }
-            .let { File(it.toFile().absolutePath + ".class").toPath() }
-        if(Files.getLastModifiedTime(nob_src).toMillis() > Files.getLastModifiedTime(nob_class_file).toMillis()) {
-            compile(module)
-            exec("java", "-cp", "out:${System.getProperty("java.class.path")}", "nob.NobKt", *args)
-            exit()
-        } 
+        val src = Paths.get(module.src)
+        val classfile = Paths.get("out/nob/nobKt.class")
+        if (!classfile.toFile().exists() || Files.getLastModifiedTime(src).toMillis() > Files.getLastModifiedTime(classfile).toMillis()) {
+            compile(module) // if we return if it was cached or compiled, we dont need the above code
+            if (exit_code != 0) exit() 
+            // we dont need to wait for this process, because this one should replace the current process
+            java.lang.ProcessBuilder("java", "-cp", "${System.getProperty("java.class.path")}", "nob.NobKt", *args).inheritIO().start() 
+            exit(0) // terminate this process because the new one is taking over
+        }
     }
 
-    private fun get_any_compiled_file(dir: File, test: Boolean): File? {
+    private fun get_any_compiled_file(dir: File): File? {
         return when {
             dir.isFile -> dir
-            dir.isDirectory -> dir.walkTopDown().filter { it.isFile && it.extension == "class" }.firstOrNull { if (test) it.name.contains("Test") else true }
+            dir.isDirectory -> dir.walkTopDown().firstOrNull { it.isFile && it.extension == "class" }
             else -> null
         }
     }
@@ -340,7 +331,7 @@ data class Opts(
     var debug: Boolean = false,
 )
 
-fun Nob.main_srcs(): Sequence<Path> = modules.map { path(it.src) }.asSequence()
+fun Nob.main_srcs(): Sequence<Path> = mods.map { path(it.src) }.asSequence()
     .flatMap { Files.walk(it).asSequence() }
     .filter { Files.isRegularFile(it) && it.toFile().readText().contains("fun main(") }
 
@@ -353,50 +344,41 @@ fun Path.main_class_fq(): String {
 fun List<Path>.into_cp(): String = joinToString(File.pathSeparator) { it.toAbsolutePath().normalize().toString() }
 fun path(str: String): Path = Paths.get(System.getProperty("user.dir"), str).also { it.toFile().mkdirs() }
 
-enum class Classpath { Compile, Runtime, Test }
-
 data class Module(
     var name: String = "app",
     var src: String = "src",
     var res: String = "res",
-    var test: String = "test",
     var target: String = "out",
-    var compile_dir: String? = null,
     var libs: List<Lib> = emptyList(), 
-    var modules: List<Module> = emptyList(),
+    var mods: List<Module> = emptyList(),
 ) {
+    fun src_target(): Path { 
+        val src_target = Paths.get(src).toFile()
+        return when {
+            src_target.isFile -> path("$target/$name")
+            src_target.isDirectory -> path("$target/$src")
+            else -> error("file is not file or directory $src_target")
+        }
+    }
+
     fun compile_cp(): String { 
         val libs = libs.filter { it.scope in listOf("compile") }.map { it.jar_path }.into_cp() 
+        val mods = mods.map { it.src_target().toAbsolutePath().normalize().toString() }.joinToString(File.pathSeparator)
         val target = path(target).toAbsolutePath().normalize().toString() 
-        return "$libs:$target"
+        return listOf(libs, mods, target).filter { it.isNotBlank() }.joinToString(File.pathSeparator)
     }
 
     fun runtime_cp(): String {
         val libs = libs.filter { it.scope in listOf("runtime", "compile") }.map { it.jar_path }.into_cp() 
+        val mods = mods.map { it.src_target().toAbsolutePath().normalize().toString() }.joinToString(File.pathSeparator)
         val target = path(target).toAbsolutePath().normalize().toString() 
+        val src_target = src_target().toAbsolutePath().normalize().toString()
         val res = path(res).toAbsolutePath().normalize().toString()
-        return "$libs:$target:$res"
-    }
-
-    fun test_compile_cp(): String {
-        val libs = libs.filter { it.scope in listOf("runtime", "compile", "test") }.map { it.jar_path }.into_cp() 
-        val target = path(target).toAbsolutePath().normalize().toString() 
-        val test = path(test).toAbsolutePath().normalize().toString()
-        val src = path(src).toAbsolutePath().normalize().toString()
-        val res = path(res).toAbsolutePath().normalize().toString()
-        return "$libs:$target:$test:$src:$res"
+        return listOf(libs, mods, res, target, src_target).filter { it.isNotBlank() }.joinToString(File.pathSeparator)
     }
 
     fun main_srcs(): Sequence<Path> = Files.walk(path(src)).asSequence().filter { Files.isRegularFile(it) && it.toFile().readText().contains("fun main(") }
     fun main_src(): Path? = Files.walk(path(src)).asSequence().singleOrNull { Files.isRegularFile(it) && it.toFile().readText().contains("fun main(") }
-
-    fun compile_dir(): String = 
-        if (compile_dir != null) compile_dir!! 
-        else main_src()
-            ?.main_class_fq() // apps may not use longer package namespaces like libs
-            ?.substringBeforeLast('.')
-            ?.replace('.', File.separatorChar) 
-            ?: src.substringBeforeLast(File.separator)
 }
 
 private val jar_cache_dir = Paths.get(System.getProperty("user.home"), ".nob_cache").also { it.toFile().mkdirs() }

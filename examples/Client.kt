@@ -1,5 +1,3 @@
-package examples
-
 import client.*
 import java.net.*
 import json.*

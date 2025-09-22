@@ -1,5 +1,3 @@
-package examples
-
 import json.*
 import kotlinx.coroutines.channels.*
 import server.*

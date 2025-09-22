@@ -2,6 +2,8 @@ package test
 
 class AssertionError(message: String) : Exception(message)
 
+fun eq(left: Any, right: Any) = assertEq(left, right)
+
 fun assertEq(left: Any, right: Any) {
     if (left != right) {
         throw AssertionError("$left != $right")
