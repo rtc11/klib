@@ -1,6 +1,6 @@
 package client
 
-import kotlinx.coroutines.future.*
+import coroutine.*
 import serde.*
 import util.*
 import java.net.*

@@ -1,7 +1,7 @@
 package server
 
 import com.sun.net.httpserver.*
-import kotlinx.coroutines.*
+import coroutine.*
 import server.StatusError.*
 import util.*
 import java.lang.Runtime.getRuntime
@@ -20,7 +20,7 @@ class Server(
     private val listener = InetSocketAddress(port)
     private val worker: ExecutorService = Executors.newWorkStealingPool(threadPoolSize)
     private val http: HttpServer = HttpServer.create()
-    private val requestScope = CoroutineScope(SupervisorJob() + worker.asCoroutineDispatcher())
+    private val requestScope = scope(worker)
     private val onStartHandlers = mutableListOf<Runnable>()
     private val onStopHandlers = mutableListOf<Runnable>()
 
@@ -60,7 +60,8 @@ class Server(
     fun router(prefix: String, block: Router.() -> Unit = {}) {
         val router = Router(prefix).apply(block)
         http.createContext(prefix) { exchange ->
-            requestScope.launch(ThreadNameContext() /* + Dispatchers.IO */) {
+            // requestScope.launch(ThreadNameContext() /* + Dispatchers.IO */) {
+            requestScope.launch {
                 val exchange = Exchange(exchange)
                 val route = router.lookupRoute(exchange)
                 val extensions = router.extensions()
@@ -71,19 +72,19 @@ class Server(
     }
 }
 
-internal class ThreadNameContext(
-    private val requestId: String = RequestId.next(),
-) : ThreadContextElement<String?>, AbstractCoroutineContextElement(Key) {
-    companion object Key : CoroutineContext.Key<ThreadNameContext>
-
-    override fun updateThreadContext(context: CoroutineContext): String {
-        return Thread.currentThread().also { it.name = requestId }.name
-    }
-
-    override fun restoreThreadContext(context: CoroutineContext, oldState: String?) {
-        Thread.currentThread().name = oldState
-    }
-}
+// internal class ThreadNameContext(
+//     private val requestId: String = RequestId.next(),
+// ) : ThreadContextElement<String?>, AbstractCoroutineContextElement(Key) {
+//     companion object Key : CoroutineContext.Key<ThreadNameContext>
+//
+//     override fun updateThreadContext(context: CoroutineContext): String {
+//         return Thread.currentThread().also { it.name = requestId }.name
+//     }
+//
+//     override fun restoreThreadContext(context: CoroutineContext, oldState: String?) {
+//         Thread.currentThread().name = oldState
+//     }
+// }
 
 private object RequestId {
     private val PREFIX = (0xFFFF * Math.random()).toInt().toString(16)

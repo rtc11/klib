@@ -17,9 +17,6 @@ fun main(args: Array<String>) {
     val klib = nob.module {
         name = "klib"
         res = ".res"
-        libs = listOf(
-            Lib.of("org.jetbrains.kotlinx:kotlinx-coroutines-core-jvm:1.10.2"),
-        )
     }
 
     val test = nob.module {
@@ -45,7 +42,16 @@ fun main(args: Array<String>) {
             nob.run(test, "test.TesterKt", arrayOf("-f", test.src_target().toAbsolutePath().normalize().toString()))
         }
         args.getOrNull(0) == "klib"     -> nob.compile(klib)
-        args.getOrNull(0) == "examples" -> nob.compile(examples)
+        args.getOrNull(0) == "examples" -> {
+            nob.compile(examples)
+            when(val example = args.getOrNull(1)) {
+                "log" -> nob.run(examples, "LogKt", arrayOf())
+                "server" -> nob.run(examples, "ServerKt", arrayOf())
+                "client" -> nob.run(examples, "ClientKt", arrayOf())
+                "coroutine" -> nob.run(examples, "CoroutineKt", arrayOf())
+                else -> {}
+            }
+        } 
         args.getOrNull(0) == "release"  -> nob.release(klib)
         else -> nob.mods.filter { it.name != "nob" }.forEach { nob.compile(it) }
     }
@@ -58,7 +64,7 @@ class Nob(val opts: Opts) {
     var compiled = mutableSetOf<Module>()
 
     fun module(block: Module.() -> Unit): Module {
-        val module = Module().apply(block)
+        val module = Module(opts).apply(block)
         module.libs = resolve_libs(opts, module)
         mods.add(module)
         return module
@@ -127,7 +133,7 @@ class Nob(val opts: Opts) {
     fun run(module: Module, main_class_fq: String, run_args: Array<String>) {
         info("Running $main_class_fq")
         val cmd = buildList{
-            add("java")
+            add("java") // add("kotlin")
             add("-Dfile.encoding=UTF-8")
             add("-Dsun.stdout.encoding=UTF-8")
             add("-Dsun.stderr.encoding=UTF-8")
@@ -331,9 +337,10 @@ fun List<Path>.into_cp(): String = joinToString(File.pathSeparator) { it.toAbsol
 fun path(str: String): Path = Paths.get(System.getProperty("user.dir"), str).also { it.toFile().mkdirs() }
 
 data class Module(
+    private val opts: Opts,
     var name: String = "app",
     var src: String = "src",
-    var res: String = "res",
+    var res: String = "",
     var target: String = "out",
     var libs: List<Lib> = emptyList(), 
     var mods: List<Module> = emptyList(),
@@ -360,7 +367,8 @@ data class Module(
         val res = path(res).toAbsolutePath().normalize().toString()
         val target = path(target).toAbsolutePath().normalize().toString() 
         val src_target = src_target().toAbsolutePath().normalize().toString()
-        return listOf(libs, mods, res, target, src_target).filter { it.isNotBlank() }.joinToString(File.pathSeparator)
+        val stdlib = opts.kotlin_home.resolve("kotlin-stdlib.jar").toAbsolutePath().normalize().toString()
+        return listOf(libs, mods, res, target, src_target, stdlib).filter { it.isNotBlank() }.joinToString(File.pathSeparator)
     }
 
     fun main_srcs(): Sequence<Path> = Files.walk(path(src)).asSequence().filter { Files.isRegularFile(it) && it.toFile().readText().contains("fun main(") }
