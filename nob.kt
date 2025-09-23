@@ -133,7 +133,7 @@ class Nob(val opts: Opts) {
     fun run(module: Module, main_class_fq: String, run_args: Array<String>) {
         info("Running $main_class_fq")
         val cmd = buildList{
-            add("java") // add("kotlin")
+            add("java")
             add("-Dfile.encoding=UTF-8")
             add("-Dsun.stdout.encoding=UTF-8")
             add("-Dsun.stderr.encoding=UTF-8")
