@@ -10,11 +10,13 @@ import org.jetbrains.kotlin.daemon.common.*
 import org.w3c.dom.*
 
 const val DEBUG = false
+const val ENABLE_COLOR = false // false when using makeprg, true when using tty
 
 fun main(args: Array<String>) {
     var nob = Nob.new(args)
 
     val klib = nob.module {
+        src = "src"
         name = "klib"
         res = ".res"
     }
@@ -63,13 +65,6 @@ class Nob(val opts: Opts) {
     var mods = mutableListOf<Module>()
     var compiled = mutableSetOf<Module>()
 
-    fun module(block: Module.() -> Unit): Module {
-        val module = Module(opts).apply(block)
-        module.libs = resolve_libs(opts, module)
-        mods.add(module)
-        return module
-    }
-
     companion object {
         fun new(args: Array<String>): Nob {
             var opts = Opts()
@@ -87,7 +82,12 @@ class Nob(val opts: Opts) {
         }
     }
 
-    fun exit(code: Int = exit_code): Unit = System.exit(code)
+    fun module(block: Module.() -> Unit): Module {
+        val module = Module(opts).apply(block)
+        module.libs = resolve_libs(opts, module)
+        mods.add(module)
+        return module
+    }
 
     fun clean() {
         val target = path(mods.first().target)
@@ -226,6 +226,8 @@ class Nob(val opts: Opts) {
         exit_code = java.lang.ProcessBuilder(*cmd).inheritIO().start().waitFor()
     }
 
+    fun exit(code: Int = exit_code): Unit = System.exit(code)
+
     private fun compile_with_daemon(src: File, target: Path, classpath: String, name: String, retries: Int = 3) {
         val kotlin_libs = listOf(
             "kotlin-stdlib.jar",
@@ -338,8 +340,8 @@ fun path(str: String): Path = Paths.get(System.getProperty("user.dir"), str).als
 
 data class Module(
     private val opts: Opts,
-    var name: String = "app",
-    var src: String = "src",
+    var name: String = "",
+    var src: String = "",
     var res: String = "",
     var target: String = "out",
     var libs: List<Lib> = emptyList(), 
@@ -368,7 +370,7 @@ data class Module(
         val target = path(target).toAbsolutePath().normalize().toString() 
         val src_target = src_target().toAbsolutePath().normalize().toString()
         val stdlib = opts.kotlin_home.resolve("kotlin-stdlib.jar").toAbsolutePath().normalize().toString()
-        return listOf(libs, mods, res, target, src_target, stdlib).filter { it.isNotBlank() }.joinToString(File.pathSeparator)
+        return listOf(res, libs, mods, target, src_target, stdlib).filter { it.isNotBlank() }.joinToString(File.pathSeparator)
     }
 
     fun main_srcs(): Sequence<Path> = Files.walk(path(src)).asSequence().filter { Files.isRegularFile(it) && it.toFile().readText().contains("fun main(") }
@@ -432,18 +434,31 @@ private fun download_jar(lib: Lib) {
 data class ResolvedLib(val lib: Lib, val resolved_from: String)
 data class LibKey(val group: String, val artifact: String)
 
+private fun find_decending_libs(module: Module, seen: MutableSet<Lib>) {
+    seen.addAll(module.libs)
+    module.mods.forEach { mod -> find_decending_libs(mod, seen) }
+}
+
 private fun resolve_libs(opts: Opts, module: Module): List<Lib> {
     val start_time = System.nanoTime()
-    val cache_file = path(module.target).resolve("libs.cache").toFile()
+
+    // one cache file per root node module
+    val cache_file = path(module.target).resolve("${module.name}-libs.cache").toFile()
     val resolved = mutableListOf<ResolvedLib>()
     read_cache(cache_file, resolved)
+
     val keys = resolved.map { LibKey(it.lib.group_id, it.lib.artifact_id) }.toMutableSet()
-    val missing_libs = module.libs.filter{ LibKey(it.group_id, it.artifact_id) !in keys }
+
+    // get all libs from the module-tree
+    val libs = mutableSetOf<Lib>()
+    find_decending_libs(module, libs)
+
+    val missing_libs = libs.filter{ LibKey(it.group_id, it.artifact_id) !in keys }
     if (missing_libs.isNotEmpty()) {
         val gradle_resolver = GradleResolver()
         val maven_resolver = MavenResolver()
         val queue = ArrayDeque<Lib>()
-        for (lib in module.libs) {
+        for (lib in libs) {
             val key = LibKey(lib.group_id, lib.artifact_id)
             if (key !in keys) {
                 resolved.add(ResolvedLib(lib, "local"))
