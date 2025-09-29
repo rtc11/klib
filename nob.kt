@@ -4,12 +4,14 @@ import java.io.*
 import java.nio.file.*
 import java.util.*
 import java.util.jar.*
+import kotlin.io.path.name
 import kotlin.streams.asSequence
 import org.jetbrains.kotlin.daemon.client.*
 import org.jetbrains.kotlin.daemon.common.*
 import org.w3c.dom.*
 
 const val DEBUG = false
+const val INFO = false
 const val ENABLE_COLOR = false // false when using makeprg, true when using tty
 
 fun main(args: Array<String>) {
@@ -25,26 +27,36 @@ fun main(args: Array<String>) {
         name = "test"
         res = ".res"
         src = "test"
-        mods = listOf(klib)
+        mods = setOf(klib)
     }
 
     val examples = nob.module {
         name = "examples"
         src = "examples"
         res = ".res"
-        mods = listOf(klib)
+        mods = setOf(klib)
     }
-    when {
-        args.getOrNull(0) == "doc" -> { 
+    when (val arg1 = args.getOrNull(0)){
+        "doc" -> { 
             nob.compile(klib)
             nob.run(klib, "doc.DocGenKt", arrayOf("src/doc/DocGen.kt", "src/doc/KotlinParser.kt"))
         }
-        args.getOrNull(0) == "test" -> {
+        "test" -> {
             nob.compile(test)
-            nob.run(test, "test.TesterKt", arrayOf("-f", test.src_target().toAbsolutePath().normalize().toString()))
+            when (args.getOrNull(1)) {
+                null -> nob.run(test, "test.TesterKt", arrayOf("-f", test.src_target().toAbsolutePath().normalize().toString()))
+                else -> nob.run(test, "test.TesterKt", args.drop(1).toTypedArray())
+            }
         }
-        args.getOrNull(0) == "klib"     -> nob.compile(klib)
-        args.getOrNull(0) == "examples" -> {
+        "neotest" -> {
+            nob.compile(test)
+            when (val arg2 = args.getOrNull(1)) {
+                "discover" -> {}
+                "run" -> nob.run(test, "test.TesterKt", arrayOf("-c", "classname", "-t", "testname"))
+            }
+        }
+        "klib"     -> nob.compile(klib)
+        "examples" -> {
             nob.compile(examples)
             when(val example = args.getOrNull(1)) {
                 "log" -> nob.run(examples, "LogKt", arrayOf())
@@ -54,7 +66,27 @@ fun main(args: Array<String>) {
                 else -> {}
             }
         } 
-        args.getOrNull(0) == "release"  -> nob.release(klib)
+        "release"  -> {
+            nob.compile(test)
+            nob.release(klib)
+        }
+        "libs" -> {
+            when (val a2 = args.getOrNull(2)) {
+                "compile" -> klib.libs.filter { it.scope == "compile" }.sortedBy { it.toString() }.forEach { println(it) }
+                "runtime" -> klib.libs.filter { it.scope == "compile" || it.scope == "runtime" }.sortedBy { it.toString() }.forEach { println(it) }
+                "test" -> test.libs.sortedBy { it.toString() }.forEach { println(it) }
+                else -> {}
+            }
+        }
+        "classpath" -> {
+            when (val a3 = args.getOrNull(2)) {
+                "compile" -> println(klib.compile_cp().replace(':', '\n'))
+                "runtime" -> println(examples.runtime_cp().replace(':', '\n'))
+                "testcompile" -> println(test.compile_cp().replace(':', '\n'))
+                "testruntime" -> println(test.runtime_cp().replace(':', '\n'))
+                else -> {}
+            }
+        }
         else -> nob.mods.filter { it.name != "nob" }.forEach { nob.compile(it) }
     }
     nob.exit()
@@ -62,7 +94,7 @@ fun main(args: Array<String>) {
 
 class Nob(val opts: Opts) {
     private var exit_code = 0
-    var mods = mutableListOf<Module>()
+    var mods = mutableSetOf<Module>()
     var compiled = mutableSetOf<Module>()
 
     companion object {
@@ -100,9 +132,9 @@ class Nob(val opts: Opts) {
         exit(0)
     }
 
-    fun compile(module: Module) {
+    fun compile(module: Module): Boolean {
         val start_time = System.nanoTime()
-        if (module in compiled) return
+        if (module in compiled) return false
         module.mods.forEach { compile(it) }
 
         val src = path(module.src).toFile()
@@ -119,19 +151,17 @@ class Nob(val opts: Opts) {
         }
 
         compiled.add(module)
+        if (!has_changes) return false
 
-        if (has_changes) {
-            val classpath = module.compile_cp()
-            if (src.isFile && src.name == "nob.kt") target = Paths.get(module.target).toAbsolutePath().normalize() 
-            compile_with_daemon(src, target, classpath, module.name)
-            info("Compiled ${module.name} ${stop(start_time)}")
-        } else {
-            info("${module.name} is up to date ${stop(start_time)}")
-        }
+        val classpath = module.compile_cp()
+        if (src.isFile && src.name == "nob.kt") target = Paths.get(module.target).toAbsolutePath().normalize() 
+        compile_with_daemon(src, target, classpath, module.name)
+        info("Compiled ${module.name} ${stop(start_time)}")
+        return true
     }
 
     fun run(module: Module, main_class_fq: String, run_args: Array<String>) {
-        info("Running $main_class_fq")
+        // info("Running $main_class_fq")
         val cmd = buildList{
             add("java")
             add("-Dfile.encoding=UTF-8")
@@ -153,6 +183,12 @@ class Nob(val opts: Opts) {
             src_target.isFile -> module.target
             src_target.isDirectory -> Paths.get(module.target, module.src).toString()
             else -> error("file is not file or directory $src_target")
+        }
+
+        val runtime_libs = path(compiled_dir).resolve("runtime-libs").also { it.toFile().mkdirs() }
+        module.runtime_cp().split(':').map { Path.of(it) }.filter { it.name.substringAfterLast('.') == "jar" }.forEach { 
+            exec("cp", it.toString(), runtime_libs.resolve(it.name).toString())
+            // exec("ln", "-sf", it.toString(), runtime_libs.resolve(it.name).toString()) // docker does not follow symlink when copying
         }
 
         val meta_inf = "META-INF/${module.name}.kotlin_module"
@@ -204,21 +240,21 @@ class Nob(val opts: Opts) {
                 }
             }
         }
-        info("Released ${module.name}-fat.jar ${stop(start_time)}")
+        // info("Released ${module.name}-fat.jar ${stop(start_time)}")
     }
 
-    fun exec(quiet: Boolean, vararg cmd: String) {
-        if (quiet) {
-            if (opts.verbose) info(cmd.joinToString(" "))
-            exit_code = java.lang.ProcessBuilder(*cmd)
-                .redirectOutput(java.lang.ProcessBuilder.Redirect.DISCARD)
-                .redirectError(java.lang.ProcessBuilder.Redirect.DISCARD)
-                .start()
-                .waitFor()
-        } else {
-            exec(*cmd)
-        }
-    }
+    // fun exec(quiet: Boolean, vararg cmd: String) {
+    //     if (quiet) {
+    //         if (opts.verbose) info(cmd.joinToString(" "))
+    //         exit_code = java.lang.ProcessBuilder(*cmd)
+    //             .redirectOutput(java.lang.ProcessBuilder.Redirect.DISCARD)
+    //             .redirectError(java.lang.ProcessBuilder.Redirect.DISCARD)
+    //             .start()
+    //             .waitFor()
+    //     } else {
+    //         exec(*cmd)
+    //     }
+    // }
 
     fun exec(vararg cmd: String) {
         if (opts.verbose) info(cmd.joinToString(" "))
@@ -294,14 +330,10 @@ class Nob(val opts: Opts) {
     }
 
     private fun rebuild_urself(module: Module, args: Array<String>) {
-        val src = Paths.get(module.src)
-        val classfile = Paths.get("out/nob/nobKt.class")
-        if (!classfile.toFile().exists() || Files.getLastModifiedTime(src).toMillis() > Files.getLastModifiedTime(classfile).toMillis()) {
-            compile(module) // if we return if it was cached or compiled, we dont need the above code
+        if (compile(module)) {
             if (exit_code != 0) exit() 
-            // we dont need to wait for this process, because this one should replace the current process
             java.lang.ProcessBuilder("java", "-cp", "${System.getProperty("java.class.path")}", "nob.NobKt", *args).inheritIO().start() 
-            exit(0) // terminate this process because the new one is taking over
+            exit(0)
         }
     }
 
@@ -317,7 +349,7 @@ class Nob(val opts: Opts) {
 data class Opts(
     var jvm_version: Int = 21,
     var kotlin_version: String = "2.2.0",
-    var kotlin_home: Path = Paths.get(System.getenv("KOTLIN_HOME"), "libexec", "lib"),
+    var kotlin_home: Path = Paths.get(System.getenv("KOTLIN_LIB")),
     var backend_threads: Int = 0, // run codegen with N thread per processor (Default 1)
     var verbose: Boolean = false,
     var error: Boolean = true,
@@ -344,8 +376,8 @@ data class Module(
     var src: String = "",
     var res: String = "",
     var target: String = "out",
-    var libs: List<Lib> = emptyList(), 
-    var mods: List<Module> = emptyList(),
+    var libs: Set<Lib> = emptySet(), 
+    var mods: Set<Module> = emptySet(),
 ) {
     fun src_target(): Path { 
         val src_target = Paths.get(src).toFile()
@@ -366,7 +398,7 @@ data class Module(
     fun runtime_cp(): String {
         val libs = libs.filter { it.scope in listOf("runtime", "compile") }.map { it.jar_path }.into_cp() 
         val mods = mods.map { it.src_target().toAbsolutePath().normalize().toString() }.joinToString(File.pathSeparator)
-        val res = path(res).toAbsolutePath().normalize().toString()
+        val res = if (res.isNotBlank()) path(res).toAbsolutePath().normalize().toString() else ""
         val target = path(target).toAbsolutePath().normalize().toString() 
         val src_target = src_target().toAbsolutePath().normalize().toString()
         val stdlib = opts.kotlin_home.resolve("kotlin-stdlib.jar").toAbsolutePath().normalize().toString()
@@ -439,12 +471,12 @@ private fun find_decending_libs(module: Module, seen: MutableSet<Lib>) {
     module.mods.forEach { mod -> find_decending_libs(mod, seen) }
 }
 
-private fun resolve_libs(opts: Opts, module: Module): List<Lib> {
+private fun resolve_libs(opts: Opts, module: Module): Set<Lib> {
     val start_time = System.nanoTime()
 
     // one cache file per root node module
     val cache_file = path(module.target).resolve("${module.name}-libs.cache").toFile()
-    val resolved = mutableListOf<ResolvedLib>()
+    val resolved = mutableSetOf<ResolvedLib>()
     read_cache(cache_file, resolved)
 
     val keys = resolved.map { LibKey(it.lib.group_id, it.lib.artifact_id) }.toMutableSet()
@@ -484,16 +516,15 @@ private fun resolve_libs(opts: Opts, module: Module): List<Lib> {
                     }
                 }
         }
-        info("resolve_kotlin_libs")
         return resolved.resolve_kotlin_libs(opts).also {
             save_cache(cache_file, it)
             info("Resolved ${resolved.size} libs ${stop(start_time)}")
-        }.map { it.lib }
+        }.map { it.lib }.toSet()
     }
-    return resolved.map { it.lib }
+    return resolved.map { it.lib }.toSet()
 }
 
-private fun List<ResolvedLib>.resolve_kotlin_libs(opts: Opts): List<ResolvedLib> {
+private fun Set<ResolvedLib>.resolve_kotlin_libs(opts: Opts): Set<ResolvedLib> {
     return this.map { resolved -> 
         val lib = resolved.lib
         when (lib.group_id) {
@@ -501,7 +532,7 @@ private fun List<ResolvedLib>.resolve_kotlin_libs(opts: Opts): List<ResolvedLib>
                 val local = opts.kotlin_home.resolve("${lib.artifact_id}.jar")
                 when (local.toFile().exists()) {
                     true -> {
-                        info("found local kotlin substitute: $local")
+                        // info("found local kotlin substitute: $local")
                         ResolvedLib(lib.copy(version = opts.kotlin_version, jar_path = local, repo = "local"), resolved.resolved_from)
                     }
                     false -> {
@@ -512,10 +543,10 @@ private fun List<ResolvedLib>.resolve_kotlin_libs(opts: Opts): List<ResolvedLib>
             }
             else -> resolved
         }
-    }
+    }.toSet()
 }
 
-private fun read_cache(file: File, resolved: MutableList<ResolvedLib>) {
+private fun read_cache(file: File, resolved: MutableSet<ResolvedLib>) {
     if (!file.exists()) return
     file.readLines()
         .mapNotNull { line -> 
@@ -545,7 +576,7 @@ private fun read_cache(file: File, resolved: MutableList<ResolvedLib>) {
         }.forEach(resolved::add)
 }
 
-private fun save_cache(file: File, resolved: List<ResolvedLib>) {
+private fun save_cache(file: File, resolved: Set<ResolvedLib>) {
     file.writeText(resolved.joinToString("\n") {
         when (it.lib.is_local) {
             true  -> "${it.lib}:${it.lib.scope}:${it.lib.type}:${it.resolved_from}:${it.lib.repo}:${it.lib.jar_path.toAbsolutePath().normalize().toString()}" 
@@ -555,6 +586,8 @@ private fun save_cache(file: File, resolved: List<ResolvedLib>) {
 }
 
 class GradleResolver {
+    private val parsed_module_cache: MutableMap<Lib, Map<*, *>?> = mutableMapOf()
+
     fun solve_deps(lib: Lib): Set<ResolvedLib> {
         val module = download_module(lib) ?: return emptySet()
         val component = module["component"] as Map<*, *>
@@ -620,7 +653,11 @@ class GradleResolver {
     }
 
     private fun download_module(lib: Lib): Map<*, *>? {
-        return try {
+        if (lib in parsed_module_cache) {
+            debug("download ${lib.module_url} ${color("[CACHE]", Color.cyan)}")
+            return parsed_module_cache[lib]
+        }
+        val result = try {
             val text = if (lib.module_file.exists()) {
                 lib.module_file.readText()
                     .also { debug("download ${lib.module_url} ${color("[CACHE]", Color.yellow)}") }
@@ -638,6 +675,8 @@ class GradleResolver {
             err("download ${lib.module_url} ${color("[FAIL]", Color.red)} ${e.message}")
             null
         }
+        parsed_module_cache[lib] = result
+        return result
     }
 }
 
@@ -648,7 +687,7 @@ class MavenResolver {
     private val boms_cache = mutableMapOf<Lib, Set<Lib>>()
 
     fun solve_deps(lib: Lib): Set<ResolvedLib> {
-        val pom = download_pom(lib) ?: return emptySet()
+        val pom = get_doc(lib) ?: return emptySet()
         val project = pom.getElementsByTagName("project").item(0) as Element
         val dependencies_node = project.get_direct_child("dependencies") ?: return emptySet()
         val dependencies = dependencies_node.getElementsByTagName("dependency")
@@ -895,7 +934,7 @@ fun Element.get_direct_child(tag_name: String): Element? {
 }
 
 fun debug(msg: String) { if (DEBUG) println("${color("[DEBUG]", Color.yellow)} $msg") }
-fun info(msg: String) { println("${color("[INFO]", Color.cyan)} $msg") }
+fun info(msg: String) { if (INFO) println("${color("[INFO]", Color.cyan)} $msg") }
 fun warn(msg: String) { println("${color("[WARN]", Color.magenta)} $msg") }
 fun err(msg: String) { println("${color("[ERR]", Color.red)} $msg") }
 
@@ -1009,5 +1048,4 @@ class JsonParser(private val text: String) {
     }
     private fun peek(): Char = if (i < text.length) text[i] else '\u0000'
 }
-
 
