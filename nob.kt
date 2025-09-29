@@ -48,13 +48,6 @@ fun main(args: Array<String>) {
                 else -> nob.run(test, "test.TesterKt", args.drop(1).toTypedArray())
             }
         }
-        "neotest" -> {
-            nob.compile(test)
-            when (val arg2 = args.getOrNull(1)) {
-                "discover" -> {}
-                "run" -> nob.run(test, "test.TesterKt", arrayOf("-c", "classname", "-t", "testname"))
-            }
-        }
         "klib"     -> nob.compile(klib)
         "examples" -> {
             nob.compile(examples)
